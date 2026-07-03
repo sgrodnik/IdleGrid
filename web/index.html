@@ -126,6 +126,47 @@
             max-width: 300px;
             white-space: pre-line;
         }
+
+        .legend-container {
+            margin-top: 20px;
+            max-width: 600px;
+        }
+        .legend-container h3 {
+            margin-bottom: 5px;
+            font-size: 14px;
+            border-bottom: 1px solid #000;
+            padding-bottom: 3px;
+        }
+        #legendTable {
+            width: auto;
+            min-width: 300px;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        #legendTable th, #legendTable td {
+            text-align: left;
+            padding: 2px 8px;
+            border-bottom: 1px solid #eee;
+            white-space: nowrap;
+        }
+        #legendTable td:nth-child(2) {
+            white-space: normal;
+            word-break: break-all;
+            max-width: 400px;
+        }
+        #legendTable tr:hover {
+            background: #f9f9f9;
+        }
+        #legendTable tr.legend-highlight {
+            background: #fff3cd;
+        }
+        .color-swatch {
+            width: 12px;
+            height: 12px;
+            border: 1px solid #000;
+            display: inline-block;
+            vertical-align: middle;
+        }
     </style>
 </head>
 <body>
@@ -137,6 +178,21 @@
         <div id="grid" class="grid-container"></div>
         <div id="resizeHandle" class="resize-handle"></div>
     </div>
+
+    <div id="legend" class="legend-container">
+        <h3>Today's Activities</h3>
+        <table id="legendTable">
+            <thead>
+                <tr>
+                    <th>Color</th>
+                    <th>Window Process</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
     <div id="tooltip" class="tooltip"></div>
 
     <script>
@@ -364,11 +420,36 @@
 
             // Assign colors based on total duration rank
             windowColors = {};
-            Object.entries(globalAgg)
-                .sort((a, b) => b[1] - a[1]) // Most active first
-                .forEach(([win, sec], index) => {
-                    windowColors[win] = palette[index % palette.length];
-                });
+            const sorted = Object.entries(globalAgg).sort((a, b) => b[1] - a[1]);
+
+            sorted.forEach(([win, sec], index) => {
+                windowColors[win] = palette[index % palette.length];
+            });
+
+            updateLegend(sorted);
+        }
+
+        function updateLegend(sortedData) {
+            const tbody = document.querySelector('#legendTable tbody');
+            tbody.innerHTML = '';
+
+            sortedData.forEach(([name, sec]) => {
+                const tr = document.createElement('tr');
+                tr.style.cursor = 'pointer';
+                tr.dataset.window = name; // Добавляем атрибут для поиска
+                tr.onmouseenter = () => highlightWindow(name);
+                tr.onmouseleave = () => highlightWindow(null);
+
+                const durMin = Math.round(sec / 60);
+                const color = getColor(name);
+
+                tr.innerHTML = `
+                    <td><div class="color-swatch" style="background: ${color}"></div></td>
+                    <td style="word-break: break-all;">${name}</td>
+                    <td>${durMin} min</td>
+                `;
+                tbody.appendChild(tr);
+            });
         }
 
         function updateVisuals() {
@@ -431,14 +512,23 @@
 
             // Всегда очищаем предыдущий хайлайт
             document.querySelectorAll('.fill.highlight').forEach(el => el.classList.remove('highlight'));
+            document.querySelectorAll('#legendTable tr.legend-highlight').forEach(el => el.classList.remove('legend-highlight'));
 
             if (!name) return;
 
-            // Находим все сегменты с таким же именем окна и добавляем обводку
             const escaped = name.replace(/"/g, '\\"');
+
+            // Мигаем на гриде
             document.querySelectorAll(`.fill[data-window="${escaped}"]`).forEach(el => {
                 el.classList.add('highlight');
             });
+
+            // Подсвечиваем строку в таблице
+            const row = document.querySelector(`#legendTable tr[data-window="${escaped}"]`);
+            if (row) {
+                row.classList.add('legend-highlight');
+                row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
         }
 
         function showMinuteDetails(e, h, m) {
