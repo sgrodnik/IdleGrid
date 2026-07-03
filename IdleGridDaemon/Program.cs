@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Timers;
@@ -37,6 +38,9 @@ namespace IdleGridDaemon
         private static int _activeSecondsInMinute = 0;
         private static DateTime _currentMinute;
         private static readonly object _lock = new();
+        private static NotifyIcon _trayIcon = null!;
+        private static Icon _activeIcon = null!;
+        private static Icon _idleIcon = null!;
 
         static void Main(string[] args)
         {
@@ -62,6 +66,25 @@ namespace IdleGridDaemon
 
             if (!Directory.Exists(_logDir)) Directory.CreateDirectory(_logDir);
 
+            _activeIcon = CreateSquareIcon(Color.LimeGreen);
+            _idleIcon = CreateSquareIcon(Color.Gray);
+
+            _trayIcon = new NotifyIcon()
+            {
+                Icon = _idleIcon,
+                Visible = true,
+                Text = "IdleGrid Daemon",
+                ContextMenuStrip = new ContextMenuStrip()
+            };
+
+            _trayIcon.ContextMenuStrip.Items.Add("Open Visualizer", null, (s, e) => OpenVisualizer());
+            _trayIcon.ContextMenuStrip.Items.Add("Open Logs Folder", null, (s, e) => Process.Start("explorer.exe", _logDir));
+            _trayIcon.ContextMenuStrip.Items.Add("-");
+            _trayIcon.ContextMenuStrip.Items.Add("Exit", null, (s, e) => {
+                _trayIcon.Visible = false;
+                Application.Exit();
+            });
+
             Console.WriteLine($"IdleGrid Daemon started.");
             Console.WriteLine($"Logs directory: {_logDir}");
             Console.WriteLine("Monitoring...");
@@ -77,8 +100,37 @@ namespace IdleGridDaemon
             timer.Enabled = true;
 
             // Keep the app running without a console window (OutputType is WinExe)
-            new System.Windows.Forms.ApplicationContext();
-            System.Windows.Forms.Application.Run();
+            Application.Run();
+        }
+
+        private static Icon CreateSquareIcon(Color color)
+        {
+            using var bmp = new Bitmap(32, 32);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.Clear(color);
+            }
+            return Icon.FromHandle(bmp.GetHicon());
+        }
+
+        private static void OpenVisualizer()
+        {
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string[] pathsToTry = {
+                Path.Combine(baseDir, "web", "index.html"),
+                Path.Combine(baseDir, "..", "..", "..", "..", "web", "index.html"), // From bin/Debug/net8.0-windows
+                Path.Combine(Directory.GetParent(Directory.GetParent(_logDir)?.FullName ?? "")?.FullName ?? "", "web", "index.html")
+            };
+
+            foreach (var path in pathsToTry)
+            {
+                if (File.Exists(path))
+                {
+                    Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                    return;
+                }
+            }
+            MessageBox.Show("Could not find web/index.html", "IdleGrid", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         private static DateTime GetRoundedMinute(DateTime dt) => new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, 0);
@@ -97,7 +149,10 @@ namespace IdleGridDaemon
                     _currentMinute = minute;
                 }
 
-                if (IsUserActive())
+                bool isActive = IsUserActive();
+                _trayIcon.Icon = isActive ? _activeIcon : _idleIcon;
+
+                if (isActive)
                 {
                     _activeSecondsInMinute++;
                     string activeWindow = GetActiveWindowTitle();
