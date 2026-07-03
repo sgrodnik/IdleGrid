@@ -79,6 +79,17 @@
         .fill {
             width: 100%;
             background: var(--fill-color);
+            transition: opacity 0.1s;
+        }
+        @keyframes pulse-white {
+            from { opacity: 1; }
+            to { opacity: 0.2; }
+        }
+        /* Хайлайт при наведении на конкретное окно */
+        .fill.highlight {
+            z-index: 10;
+            animation: pulse-white 0.8s ease-in-out infinite alternate;
+            position: relative;
         }
         .minute-block.current {
             background: #ffffff;
@@ -376,7 +387,6 @@
                             .sort((a, b) => b[1] - a[1]);
 
                         const top3 = sortedWindows.slice(0, 3);
-                        const others = sortedWindows.slice(3);
                         let totalShownSec = 0;
 
                         // Рисуем топ-3 процесса их уникальными цветами
@@ -385,6 +395,12 @@
                             seg.className = 'fill';
                             seg.style.height = `${(sec / 60) * 100}%`;
                             seg.style.background = getColor(name);
+                            seg.dataset.window = name;
+                            seg.onmouseenter = (e) => {
+                                e.stopPropagation(); // Избегаем конфликта с ховером блока
+                                highlightWindow(name);
+                            };
+                            seg.onmouseleave = () => highlightWindow(null);
                             block.appendChild(seg);
                             totalShownSec += sec;
                         });
@@ -406,6 +422,23 @@
                     }
                 }
             }
+        }
+
+        let currentHighlight = null;
+        function highlightWindow(name) {
+            if (name === currentHighlight) return;
+            currentHighlight = name;
+
+            // Всегда очищаем предыдущий хайлайт
+            document.querySelectorAll('.fill.highlight').forEach(el => el.classList.remove('highlight'));
+
+            if (!name) return;
+
+            // Находим все сегменты с таким же именем окна и добавляем обводку
+            const escaped = name.replace(/"/g, '\\"');
+            document.querySelectorAll(`.fill[data-window="${escaped}"]`).forEach(el => {
+                el.classList.add('highlight');
+            });
         }
 
         function showMinuteDetails(e, h, m) {
