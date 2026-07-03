@@ -72,6 +72,7 @@
             border-right: 1px solid var(--border-color);
             position: relative;
             background: #ffffff;
+            overflow: hidden; /* Скрываем части круга, выходящие за границы */
         }
         .fill {
             position: absolute;
@@ -79,6 +80,18 @@
             left: 0;
             right: 0;
             background: var(--fill-color);
+        }
+        .minute-block.current {
+            background: #ffffff;
+            position: relative;
+        }
+        .minute-block.current svg {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+        }
+        .minute-block.current path {
+            fill: black;
         }
         .resize-handle {
             position: absolute;
@@ -169,6 +182,47 @@
                 reloadData();
                 setInterval(reloadData, 60000);
             }, delay);
+
+            // Smooth progress update for the current minute
+            setInterval(updateProgress, 1000);
+            updateProgress();
+        }
+
+        function updateProgress() {
+            const now = new Date();
+            const curH = now.getHours();
+            const curM = now.getMinutes();
+            const seconds = now.getSeconds();
+            const progress = seconds / 60;
+
+            // Очищаем старые svg у неактивных блоков
+            document.querySelectorAll('.minute-block svg').forEach(s => {
+                if (s.parentElement.id !== `m-${curH}-${curM}`) {
+                    s.remove();
+                }
+            });
+
+            const block = document.getElementById(`m-${curH}-${curM}`);
+            if (block) {
+                let svg = block.querySelector('svg');
+                if (!svg) {
+                    svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                    svg.setAttribute("viewBox", "0 0 100 100");
+                    svg.setAttribute("preserveAspectRatio", "none");
+                    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    svg.appendChild(path);
+                    block.appendChild(svg);
+                }
+                const path = svg.querySelector('path');
+                const angle = progress * 2 * Math.PI;
+                // Считаем координаты точки на окружности (радиус 100, чтобы точно закрыть углы)
+                const x = 50 + 100 * Math.sin(angle);
+                const y = 50 - 100 * Math.cos(angle);
+                const largeArc = progress > 0.5 ? 1 : 0;
+
+                // Рисуем сектор: в центр -> вверх -> по дуге до точки -> в центр
+                path.setAttribute("d", `M 50 50 L 50 -50 A 100 100 0 ${largeArc} 1 ${x} ${y} Z`);
+            }
         }
 
         function renderGrid() {
@@ -242,6 +296,10 @@
         }
 
         function updateVisuals() {
+            const now = new Date();
+            const curH = now.getHours();
+            const curM = now.getMinutes();
+
             for (let h = 0; h < 24; h++) {
                 for (let m = 0; m < 60; m++) {
                     const block = document.getElementById(`m-${h}-${m}`);
@@ -249,6 +307,12 @@
                     const entry = data[`${h}-${m}`];
                     const percent = entry ? (entry.active / 60) * 100 : 0;
                     fill.style.height = `${percent}%`;
+
+                    if (h === curH && m === curM) {
+                        block.classList.add('current');
+                    } else {
+                        block.classList.remove('current');
+                    }
                 }
             }
         }
