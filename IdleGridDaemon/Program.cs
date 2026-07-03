@@ -40,6 +40,26 @@ namespace IdleGridDaemon
 
         static void Main(string[] args)
         {
+            var current = Process.GetCurrentProcess();
+            var duplicates = Process.GetProcessesByName(current.ProcessName)
+                .Where(p => p.Id != current.Id)
+                .ToList();
+
+            if (duplicates.Any())
+            {
+                var result = MessageBox.Show(
+                    "Another instance of IdleGrid Daemon is already running. Would you like to terminate it and start this one instead?",
+                    "IdleGrid Daemon",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                    foreach (var dup in duplicates)
+                        try { dup.Kill(); dup.WaitForExit(1000); } catch { }
+                else
+                    return;
+            }
+
             if (!Directory.Exists(_logDir)) Directory.CreateDirectory(_logDir);
 
             Console.WriteLine($"IdleGrid Daemon started.");
