@@ -202,9 +202,16 @@
 </head>
 <body>
     <div class="controls">
-        <button id="btnOpen">Choose Folder</button>
         <button id="btnSettings">Settings</button>
-        <span id="status"></span>
+
+        <span style="display: inline-flex; align-items: center; gap: 4px; margin-left: 15px;">
+            <button id="btnPrev">←</button>
+            <span id="currentDateDisplay" style="font-weight: bold; min-width: 80px; text-align: center;">today</span>
+            <button id="btnNext">→</button>
+        </span>
+
+        <button id="btnOpen" style="margin-left: 15px;">Choose Folder</button>
+        <span id="status" style="display: none;"></span>
     </div>
 
     <div id="settingsOverlay">
@@ -264,6 +271,7 @@
         let logsFolderHandle;
         let data = {};
         let windowColors = {};
+        let viewDate = new Date();
 
         // IndexedDB for handle persistence
         async function getDB() {
@@ -367,6 +375,26 @@
             renderGrid();
 
             const btnOpen = document.getElementById('btnOpen');
+            const dateDisplay = document.getElementById('currentDateDisplay');
+
+            const updateDateDisplay = () => {
+                const today = new Date();
+                const isToday = viewDate.toDateString() === today.toDateString();
+                dateDisplay.textContent = isToday ? 'today' : viewDate.toISOString().split('T')[0];
+            };
+
+            document.getElementById('btnPrev').onclick = () => {
+                viewDate.setDate(viewDate.getDate() - 1);
+                updateDateDisplay();
+                reloadData();
+            };
+            document.getElementById('btnNext').onclick = () => {
+                viewDate.setDate(viewDate.getDate() + 1);
+                updateDateDisplay();
+                reloadData();
+            };
+            updateDateDisplay();
+
             // Handle persistence
             const savedHandle = await loadHandle();
             if (savedHandle) {
@@ -550,7 +578,6 @@
                     logsFolderHandle = directoryHandle;
                 }
 
-                document.getElementById('status').textContent = ' Monitoring: ' + (logsFolderHandle === directoryHandle ? directoryHandle.name : '.../' + logsFolderHandle.name);
                 await reloadData();
             } catch (err) {
                 console.error(err);
@@ -559,8 +586,7 @@
 
         async function reloadData() {
             if (!logsFolderHandle) return;
-            const now = new Date();
-            const fileName = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}.log`;
+            const fileName = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}-${String(viewDate.getDate()).padStart(2, '0')}.log`;
 
             try {
                 const fileHandle = await logsFolderHandle.getFileHandle(fileName);
@@ -569,7 +595,14 @@
                 parseLogs(text);
                 updateVisuals();
             } catch (e) {
-                console.warn("Log file for today not found yet.");
+                console.warn("Log file for selected date not found:", fileName);
+                data = {}; // Clear data
+                updateVisuals(); // Update UI to show empty grid
+                // Reset stats displays
+                ['statDayStart','statWorkDayTotal','statActiveTime','statMaxStreak','statMaxBreak','statCurrentStreak'].forEach(id => {
+                    document.getElementById(id).textContent = '-';
+                });
+                document.querySelector('#legendTable tbody').innerHTML = '';
             }
         }
 
