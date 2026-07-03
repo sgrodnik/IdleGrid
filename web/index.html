@@ -426,12 +426,13 @@
             lines.forEach(line => {
                 const parts = line.split('|');
                 if (parts.length < 3) return;
-                const time = parts[0]; // yyyy-MM-dd HH:mm
+                const time = parts[0]; // HH:mm
                 const active = parseInt(parts[1]);
                 const windows = JSON.parse(parts[2]);
 
-                const hour = parseInt(time.split(' ')[1].split(':')[0]);
-                const min = parseInt(time.split(' ')[1].split(':')[1]);
+                const [hStr, mStr] = time.split(':');
+                const hour = parseInt(hStr);
+                const min = parseInt(mStr);
                 data[`${hour}-${min}`] = { active, windows };
 
                 // Track global totals for the day

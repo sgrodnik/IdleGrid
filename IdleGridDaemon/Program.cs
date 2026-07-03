@@ -129,7 +129,7 @@ namespace IdleGridDaemon
                 .OrderByDescending(x => x.Value)
                 .ToDictionary(x => x.Key, x => x.Value);
 
-            string logLine = $"{_currentMinute:yyyy-MM-dd HH:mm}|{_activeSecondsInMinute}|{JsonSerializer.Serialize(summary)}";
+            string logLine = $"{_currentMinute:HH:mm}|{_activeSecondsInMinute}|{JsonSerializer.Serialize(summary)}";
 
             try
             {
