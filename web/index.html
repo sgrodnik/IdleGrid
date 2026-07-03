@@ -53,7 +53,7 @@
         }
         .hour-label {
             grid-column: 1;
-            height: var(--cell-h);
+            height: calc(var(--h-mult, 1) * var(--cell-h));
             display: flex;
             align-items: center;
             justify-content: flex-end;
@@ -63,10 +63,11 @@
             background: #fdfdfd;
             cursor: help;
             white-space: nowrap;
+            overflow: hidden;
         }
         .minute-block {
             width: var(--cell-w);
-            height: var(--cell-h);
+            height: calc(var(--h-mult, 1) * var(--cell-h));
             border-bottom: 1px solid var(--border-color);
             border-right: 1px solid var(--border-color);
             position: relative;
@@ -173,8 +174,12 @@
         function renderGrid() {
             grid.innerHTML = '';
             for (let h = 0; h < 24; h++) {
+                const isWorkHour = h >= 7 && h < 19;
+                const hMult = isWorkHour ? 1 : 0.5;
+
                 const hourLabel = document.createElement('div');
                 hourLabel.className = 'hour-label';
+                hourLabel.style.setProperty('--h-mult', hMult);
                 hourLabel.textContent = `${String(h).padStart(2, '0')}:00`;
                 hourLabel.onmouseenter = (e) => showHourSummary(e, h);
                 grid.appendChild(hourLabel);
@@ -182,6 +187,7 @@
                 for (let m = 0; m < 60; m++) {
                     const minBlock = document.createElement('div');
                     minBlock.className = 'minute-block';
+                    minBlock.style.setProperty('--h-mult', hMult);
                     minBlock.id = `m-${h}-${m}`;
                     minBlock.onmouseenter = (e) => showMinuteDetails(e, h, m);
                     minBlock.onmouseleave = () => tooltip.style.display = 'none';
