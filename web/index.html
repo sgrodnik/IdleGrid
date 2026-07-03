@@ -127,25 +127,34 @@
             white-space: pre-line;
         }
 
-        .legend-container {
-            margin-top: 20px;
-            max-width: 600px;
+        /* Bottom Layout */
+        .bottom-sections {
+            display: flex;
+            gap: 40px;
+            align-items: flex-start;
+            margin-top: 10px;
         }
-        .legend-container h3 {
+        .legend-container, .stats-container {
+            margin-top: 10px;
+        }
+        .legend-container h3, .stats-container h3 {
             margin-bottom: 5px;
-            font-size: 14px;
+            font-size: 13px;
             border-bottom: 1px solid #000;
             padding-bottom: 3px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
-        #legendTable {
-            width: auto;
-            min-width: 300px;
+
+        #legendTable, #statsTable {
             border-collapse: collapse;
             font-size: 11px;
+            width: auto;
         }
-        #legendTable th, #legendTable td {
+        #legendTable th, #legendTable td,
+        #statsTable th, #statsTable td {
             text-align: left;
-            padding: 2px 8px;
+            padding: 3px 10px;
             border-bottom: 1px solid #eee;
             white-space: nowrap;
         }
@@ -174,23 +183,40 @@
         <button id="btnOpen">Open Log Folder</button>
         <span id="status"></span>
     </div>
+
     <div class="grid-wrapper">
         <div id="grid" class="grid-container"></div>
         <div id="resizeHandle" class="resize-handle"></div>
     </div>
 
-    <div id="legend" class="legend-container">
-        <h3>Today's Activities</h3>
-        <table id="legendTable">
-            <thead>
-                <tr>
-                    <th>Color</th>
-                    <th>Window Process</th>
-                    <th>Duration</th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
+    <div class="bottom-sections">
+        <div id="legend" class="legend-container">
+            <h3>Today's Activities</h3>
+            <table id="legendTable">
+                <thead>
+                    <tr>
+                        <th>Color</th>
+                        <th>Window Process</th>
+                        <th>Duration</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="stats-container">
+            <h3>Day Summary</h3>
+            <table id="statsTable">
+                <tbody>
+                    <tr><th>Day Start</th><td id="statDayStart">-</td></tr>
+                    <tr><th>Work Duration</th><td id="statWorkDayTotal">-</td></tr>
+                    <tr><th>Total Active</th><td id="statTotalActive">-</td></tr>
+                    <tr><th>Longest Streak</th><td id="statMaxStreak">-</td></tr>
+                    <tr><th>Current Session</th><td id="statCurrentStreak">-</td></tr>
+                    <tr><th>Longest Break</th><td id="statMaxBreak">-</td></tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <div id="tooltip" class="tooltip"></div>
@@ -427,6 +453,89 @@
             });
 
             updateLegend(sorted);
+            analyzeSessions();
+        }
+
+        function analyzeSessions() {
+            const GAP_LIMIT = 5; // minutes of inactivity to break a session
+            const ACTIVE_THRESHOLD = 5; // seconds in a minute to consider it "work"
+            
+            let sessions = [];
+            let currentSession = null;
+            let totalActiveSec = 0;
+
+            const minutesWithData = Object.keys(data).map(k => {
+                const [h, m] = k.split('-').map(Number);
+                return { key: k, totalMin: h * 60 + m, active: data[k].active };
+            }).sort((a, b) => a.totalMin - b.totalMin);
+
+            minutesWithData.forEach(m => {
+                totalActiveSec += m.active;
+                if (m.active >= ACTIVE_THRESHOLD) {
+                    if (!currentSession) {
+                        currentSession = { start: m.totalMin, last: m.totalMin };
+                    } else if (m.totalMin - currentSession.last > GAP_LIMIT) {
+                        sessions.push(currentSession);
+                        currentSession = { start: m.totalMin, last: m.totalMin };
+                    } else {
+                        currentSession.last = m.totalMin;
+                    }
+                }
+            });
+            if (currentSession) sessions.push(currentSession);
+
+            const toTime = (totalMin) => `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
+
+            if (sessions.length > 0) {
+                const startMin = sessions[0].start;
+                const endMin = sessions[sessions.length - 1].last;
+                
+                // Day Start
+                document.getElementById('statDayStart').textContent = toTime(startMin);
+                
+                // Work Day Duration (from first start to now/last activity)
+                const now = new Date();
+                const nowMin = now.getHours() * 60 + now.getMinutes();
+                // Для вчерашних данных используем последний лог, для сегодняшних - текущее время
+                const duration = Math.max(0, nowMin - startMin); 
+                const durH = Math.floor(duration/60);
+                const durM = duration % 60;
+                document.getElementById('statWorkDayTotal').textContent = `${durH}h ${durM}m`;
+
+                // Longest Streak
+                let maxStreakIdx = 0;
+                let maxStreakVal = 0;
+                sessions.forEach((s, i) => {
+                    const len = s.last - s.start + 1;
+                    if (len > maxStreakVal) {
+                        maxStreakVal = len;
+                        maxStreakIdx = i;
+                    }
+                });
+                const best = sessions[maxStreakIdx];
+                document.getElementById('statMaxStreak').textContent = `${maxStreakVal}m (from ${toTime(best.start)})`;
+
+                // Longest Break
+                let maxBreak = 0;
+                for (let i = 1; i < sessions.length; i++) {
+                    const gap = sessions[i].start - sessions[i-1].last;
+                    if (gap > maxBreak) maxBreak = gap;
+                }
+                document.getElementById('statMaxBreak').textContent = `${maxBreak}m`;
+
+                // Current Session
+                let currentStreakVal = 0;
+                const lastSession = sessions[sessions.length - 1];
+                if (nowMin - lastSession.last <= 10) {
+                    currentStreakVal = nowMin - lastSession.start;
+                }
+                document.getElementById('statCurrentStreak').textContent = `${currentStreakVal}m`;
+            }
+
+            // Total Active (pure time)
+            const totalHours = Math.floor(totalActiveSec / 3600);
+            const totalMins = Math.floor((totalActiveSec % 3600) / 60);
+            document.getElementById('statTotalActive').textContent = `${totalHours}h ${totalMins}m`;
         }
 
         function updateLegend(sortedData) {
