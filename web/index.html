@@ -175,12 +175,49 @@
             display: inline-block;
             vertical-align: middle;
         }
+
+        /* Settings Modal */
+        #settingsOverlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.95);
+            z-index: 2000;
+            display: none;
+            padding: 40px;
+            box-sizing: border-box;
+        }
+        .settings-content {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .settings-content textarea {
+            width: 100%;
+            height: 200px;
+            font-family: 'Consolas', monospace;
+            padding: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #000;
+        }
     </style>
 </head>
 <body>
     <div class="controls">
         <button id="btnOpen">Open Log Folder</button>
+        <button id="btnSettings">Settings</button>
         <span id="status"></span>
+    </div>
+
+    <div id="settingsOverlay">
+        <div class="settings-content">
+            <h3>Configuration</h3>
+            <p>Edit values below (JSON format):</p>
+            <textarea id="settingsText"></textarea>
+            <div style="display: flex; gap: 10px;">
+                <button id="btnSaveSettings">Save & Apply</button>
+                <button id="btnResetSettings">Reset to Defaults</button>
+                <button id="btnCloseSettings">Cancel</button>
+            </div>
+        </div>
     </div>
 
     <div class="grid-wrapper">
@@ -227,6 +264,15 @@
         let logsFolderHandle; // Handle for the actual 'logs' subfolder
         let data = {}; // date_hour_min -> { active, windows }
         let windowColors = {}; // windowName -> color (assigned by daily rank)
+
+        const defaultConfig = {
+            GAP_LIMIT: 5,         // minutes of inactivity to break a session
+            ACTIVE_THRESHOLD: 5,  // seconds in a minute to consider it "work"
+            WORK_START: 7,        // hour to start highlighting
+            WORK_END: 19          // hour to end highlighting
+        };
+
+        let config = { ...defaultConfig };
 
         // Setup Resizing
         const root = document.querySelector(':root');
@@ -280,8 +326,38 @@
             const sh = localStorage.getItem('ig-h') || 25;
             updateSize(sw, sh);
 
+            // Restore config
+            const savedConfig = localStorage.getItem('ig-config');
+            if (savedConfig) {
+                try { config = JSON.parse(savedConfig); } catch(e) {}
+            }
+
             renderGrid();
             document.getElementById('btnOpen').onclick = openFolder;
+
+            // Settings Logic
+            const overlay = document.getElementById('settingsOverlay');
+            const txt = document.getElementById('settingsText');
+
+            document.getElementById('btnSettings').onclick = () => {
+                txt.value = JSON.stringify(config, null, 4);
+                overlay.style.display = 'block';
+            };
+            document.getElementById('btnResetSettings').onclick = () => {
+                txt.value = JSON.stringify(defaultConfig, null, 4);
+            };
+            document.getElementById('btnCloseSettings').onclick = () => overlay.style.display = 'none';
+            document.getElementById('btnSaveSettings').onclick = () => {
+                try {
+                    config = JSON.parse(txt.value);
+                    localStorage.setItem('ig-config', JSON.stringify(config));
+                    overlay.style.display = 'none';
+                    renderGrid();
+                    if (logsFolderHandle) reloadData();
+                } catch(e) {
+                    alert("Invalid JSON format");
+                }
+            };
 
             // Sync reload with the start of the next minute
             const now = new Date();
@@ -333,7 +409,7 @@
         function renderGrid() {
             grid.innerHTML = '';
             for (let h = 0; h < 24; h++) {
-                const isWorkHour = h >= 7 && h < 19;
+                const isWorkHour = h >= config.WORK_START && h < config.WORK_END;
                 const hMult = isWorkHour ? 1 : 0.5;
 
                 const hourLabel = document.createElement('div');
@@ -454,9 +530,6 @@
         }
 
         function analyzeSessions() {
-            const GAP_LIMIT = 5; // minutes of inactivity to break a session
-            const ACTIVE_THRESHOLD = 5; // seconds in a minute to consider it "work"
-            
             let sessions = [];
             let currentSession = null;
             let totalActiveSec = 0;
@@ -468,10 +541,10 @@
 
             minutesWithData.forEach(m => {
                 totalActiveSec += m.active;
-                if (m.active >= ACTIVE_THRESHOLD) {
+                if (m.active >= config.ACTIVE_THRESHOLD) {
                     if (!currentSession) {
                         currentSession = { start: m.totalMin, last: m.totalMin };
-                    } else if (m.totalMin - currentSession.last > GAP_LIMIT) {
+                    } else if (m.totalMin - currentSession.last > config.GAP_LIMIT) {
                         sessions.push(currentSession);
                         currentSession = { start: m.totalMin, last: m.totalMin };
                     } else {
@@ -486,14 +559,14 @@
             if (sessions.length > 0) {
                 const startMin = sessions[0].start;
                 const endMin = sessions[sessions.length - 1].last;
-                
+
                 // Day Start
                 document.getElementById('statDayStart').textContent = toTime(startMin);
-                
+
                 // Work Day Duration (from first start to now/last activity)
                 const now = new Date();
                 const nowMin = now.getHours() * 60 + now.getMinutes();
-                const duration = Math.max(0, nowMin - startMin); 
+                const duration = Math.max(0, nowMin - startMin);
                 const durH = Math.floor(duration/60);
                 const durM = duration % 60;
                 document.getElementById('statWorkDayTotal').textContent = `${durH}h ${durM}m`;
