@@ -8,7 +8,7 @@
         :root {
             --bg-color: #ffffff;
             --border-color: #000000;
-            --fill-color: #333333;
+            --fill-color: #333333; /* Darker default to contrast with colored blocks */
             --grid-line: #eeeeee;
             --cell-w: 12px;
             --cell-h: 25px;
@@ -72,13 +72,12 @@
             border-right: 1px solid var(--border-color);
             position: relative;
             background: #ffffff;
-            overflow: hidden; /* Скрываем части круга, выходящие за границы */
+            overflow: hidden;
+            display: flex; /* Для стекирования слоев */
+            flex-direction: column-reverse;
         }
         .fill {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
+            width: 100%;
             background: var(--fill-color);
         }
         .minute-block.current {
@@ -135,10 +134,26 @@
         let directoryHandle;
         let logsFolderHandle; // Handle for the actual 'logs' subfolder
         let data = {}; // date_hour_min -> { active, windows }
+        let windowColors = {}; // windowName -> color (assigned by daily rank)
 
         // Setup Resizing
         const root = document.querySelector(':root');
         const handle = document.getElementById('resizeHandle');
+
+        const palette = [
+            "#f9c74f",
+            "#90be6d",
+            "#f9844a",
+            "#43aa8b",
+            "#f8961e",
+            "#577590",
+            "#f94144",
+            "#6627a1"
+        ];
+
+        function getColor(str) {
+            return windowColors[str] || '#cccccc';
+        }
 
         function updateSize(w, h) {
             root.style.setProperty('--cell-w', w + 'px');
@@ -317,6 +332,8 @@
         function parseLogs(text) {
             const lines = text.split('\n');
             data = {};
+            const globalAgg = {}; // To rank most active windows for color assignment
+
             lines.forEach(line => {
                 const parts = line.split('|');
                 if (parts.length < 3) return;
@@ -327,7 +344,20 @@
                 const hour = parseInt(time.split(' ')[1].split(':')[0]);
                 const min = parseInt(time.split(' ')[1].split(':')[1]);
                 data[`${hour}-${min}`] = { active, windows };
+
+                // Track global totals for the day
+                for (const [win, sec] of Object.entries(windows)) {
+                    globalAgg[win] = (globalAgg[win] || 0) + sec;
+                }
             });
+
+            // Assign colors based on total duration rank
+            windowColors = {};
+            Object.entries(globalAgg)
+                .sort((a, b) => b[1] - a[1]) // Most active first
+                .forEach(([win, sec], index) => {
+                    windowColors[win] = palette[index % palette.length];
+                });
         }
 
         function updateVisuals() {
@@ -338,10 +368,36 @@
             for (let h = 0; h < 24; h++) {
                 for (let m = 0; m < 60; m++) {
                     const block = document.getElementById(`m-${h}-${m}`);
-                    const fill = block.querySelector('.fill');
+                    block.querySelectorAll('.fill').forEach(f => f.remove());
+
                     const entry = data[`${h}-${m}`];
-                    const percent = entry ? (entry.active / 60) * 100 : 0;
-                    fill.style.height = `${percent}%`;
+                    if (entry) {
+                        const sortedWindows = Object.entries(entry.windows)
+                            .sort((a, b) => b[1] - a[1]);
+
+                        const top3 = sortedWindows.slice(0, 3);
+                        const others = sortedWindows.slice(3);
+                        let totalShownSec = 0;
+
+                        // Рисуем топ-3 процесса их уникальными цветами
+                        top3.forEach(([name, sec]) => {
+                            const seg = document.createElement('div');
+                            seg.className = 'fill';
+                            seg.style.height = `${(sec / 60) * 100}%`;
+                            seg.style.background = getColor(name);
+                            block.appendChild(seg);
+                            totalShownSec += sec;
+                        });
+
+                        // Остальное время - дефолтным цветом
+                        const otherSec = entry.active - totalShownSec;
+                        if (otherSec > 0) {
+                            const seg = document.createElement('div');
+                            seg.className = 'fill';
+                            seg.style.height = `${(otherSec / 60) * 100}%`;
+                            block.appendChild(seg);
+                        }
+                    }
 
                     if (h === curH && m === curM) {
                         block.classList.add('current');
