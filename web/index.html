@@ -10,6 +10,8 @@
             --border-color: #000000;
             --fill-color: #333333;
             --grid-line: #eeeeee;
+            --cell-w: 12px;
+            --cell-h: 25px;
         }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -19,6 +21,14 @@
         }
         .controls {
             margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         button {
             border: 1px solid var(--border-color);
@@ -29,16 +39,21 @@
         }
         button:hover { background: #f0f0f0; }
 
+        .grid-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
         .grid-container {
             display: inline-grid;
-            grid-template-columns: 40px repeat(60, 12px);
+            grid-template-columns: 40px repeat(60, var(--cell-w));
             gap: 0;
             border-top: 1px solid var(--border-color);
             border-left: 1px solid var(--border-color);
         }
         .hour-label {
             grid-column: 1;
-            height: 25px;
+            height: var(--cell-h);
             display: flex;
             align-items: center;
             justify-content: flex-end;
@@ -47,10 +62,11 @@
             border-right: 1px solid var(--border-color);
             background: #fdfdfd;
             cursor: help;
+            white-space: nowrap;
         }
         .minute-block {
-            width: 12px;
-            height: 25px;
+            width: var(--cell-w);
+            height: var(--cell-h);
             border-bottom: 1px solid var(--border-color);
             border-right: 1px solid var(--border-color);
             position: relative;
@@ -62,6 +78,17 @@
             left: 0;
             right: 0;
             background: var(--fill-color);
+        }
+        .resize-handle {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            width: 15px;
+            height: 15px;
+            cursor: nwse-resize;
+            background: linear-gradient(135deg, transparent 50%, black 50%, black 60%, transparent 60%, transparent 70%, black 70%);
+            border-right: 1px solid black;
+            border-bottom: 1px solid black;
         }
         .tooltip {
             position: fixed;
@@ -82,7 +109,10 @@
         <button id="btnOpen">Open Log Folder</button>
         <span id="status"></span>
     </div>
-    <div id="grid" class="grid-container"></div>
+    <div class="grid-wrapper">
+        <div id="grid" class="grid-container"></div>
+        <div id="resizeHandle" class="resize-handle"></div>
+    </div>
     <div id="tooltip" class="tooltip"></div>
 
     <script>
@@ -91,7 +121,43 @@
         let directoryHandle;
         let data = {}; // date_hour_min -> { active, windows }
 
+        // Setup Resizing
+        const root = document.querySelector(':root');
+        const handle = document.getElementById('resizeHandle');
+
+        function updateSize(w, h) {
+            root.style.setProperty('--cell-w', w + 'px');
+            root.style.setProperty('--cell-h', h + 'px');
+            localStorage.setItem('ig-w', w);
+            localStorage.setItem('ig-h', h);
+        }
+
+        // Drag handle logic
+        handle.onmousedown = (e) => {
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const startW = parseInt(getComputedStyle(root).getPropertyValue('--cell-w'));
+            const startH = parseInt(getComputedStyle(root).getPropertyValue('--cell-h'));
+
+            const onMove = (em) => {
+                const nw = Math.max(2, startW + Math.round((em.clientX - startX) / 60));
+                const nh = Math.max(5, startH + Math.round((em.clientY - startY) / 24));
+                updateSize(nw, nh);
+            };
+            const onUp = () => {
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onUp);
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+        };
+
         async function init() {
+            // Restore size
+            const sw = localStorage.getItem('ig-w') || 12;
+            const sh = localStorage.getItem('ig-h') || 25;
+            updateSize(sw, sh);
+
             renderGrid();
             document.getElementById('btnOpen').onclick = openFolder;
 
