@@ -77,6 +77,10 @@ namespace IdleGridDaemon
                 ContextMenuStrip = new ContextMenuStrip()
             };
 
+            _trayIcon.MouseClick += (s, e) => {
+                if (e.Button == MouseButtons.Left) OpenVisualizer();
+            };
+
             _trayIcon.ContextMenuStrip.Items.Add("Open Visualizer", null, (s, e) => OpenVisualizer());
             _trayIcon.ContextMenuStrip.Items.Add("Open Logs Folder", null, (s, e) => Process.Start("explorer.exe", _logDir));
             _trayIcon.ContextMenuStrip.Items.Add("-");
