@@ -8,7 +8,7 @@
         :root {
             --bg-color: #ffffff;
             --border-color: #000000;
-            --fill-color: #333333; /* Darker default to contrast with colored blocks */
+            --fill-color: #333333;
             --grid-line: #eeeeee;
             --cell-w: 12px;
             --cell-h: 25px;
@@ -73,7 +73,7 @@
             position: relative;
             background: #ffffff;
             overflow: hidden;
-            display: flex; /* Для стекирования слоев */
+            display: flex;
             flex-direction: column-reverse;
         }
         .fill {
@@ -85,7 +85,6 @@
             from { opacity: 1; }
             to { opacity: 0.2; }
         }
-        /* Хайлайт при наведении на конкретное окно */
         .fill.highlight {
             z-index: 10;
             animation: pulse-white 0.8s ease-in-out infinite alternate;
@@ -304,7 +303,6 @@
             const seconds = now.getSeconds();
             const progress = seconds / 60;
 
-            // Очищаем старые svg у неактивных блоков
             document.querySelectorAll('.minute-block svg').forEach(s => {
                 if (s.parentElement.id !== `m-${curH}-${curM}`) {
                     s.remove();
@@ -324,12 +322,10 @@
                 }
                 const path = svg.querySelector('path');
                 const angle = progress * 2 * Math.PI;
-                // Считаем координаты точки на окружности (радиус 100, чтобы точно закрыть углы)
                 const x = 50 + 100 * Math.sin(angle);
                 const y = 50 - 100 * Math.cos(angle);
                 const largeArc = progress > 0.5 ? 1 : 0;
 
-                // Рисуем сектор: в центр -> вверх -> по дуге до точки -> в центр
                 path.setAttribute("d", `M 50 50 L 50 -50 A 100 100 0 ${largeArc} 1 ${x} ${y} Z`);
             }
         }
@@ -496,7 +492,6 @@
                 // Work Day Duration (from first start to now/last activity)
                 const now = new Date();
                 const nowMin = now.getHours() * 60 + now.getMinutes();
-                // Для вчерашних данных используем последний лог, для сегодняшних - текущее время
                 const duration = Math.max(0, nowMin - startMin); 
                 const durH = Math.floor(duration/60);
                 const durM = duration % 60;
@@ -545,7 +540,7 @@
             sortedData.forEach(([name, sec]) => {
                 const tr = document.createElement('tr');
                 tr.style.cursor = 'pointer';
-                tr.dataset.window = name; // Добавляем атрибут для поиска
+                tr.dataset.window = name;
                 tr.onmouseenter = () => highlightWindow(name);
                 tr.onmouseleave = () => highlightWindow(null);
 
@@ -579,7 +574,6 @@
                         const top3 = sortedWindows.slice(0, 3);
                         let totalShownSec = 0;
 
-                        // Рисуем топ-3 процесса их уникальными цветами
                         top3.forEach(([name, sec]) => {
                             const seg = document.createElement('div');
                             seg.className = 'fill';
@@ -587,7 +581,7 @@
                             seg.style.background = getColor(name);
                             seg.dataset.window = name;
                             seg.onmouseenter = (e) => {
-                                e.stopPropagation(); // Избегаем конфликта с ховером блока
+                                e.stopPropagation();
                                 highlightWindow(name);
                             };
                             seg.onmouseleave = () => highlightWindow(null);
@@ -595,7 +589,6 @@
                             totalShownSec += sec;
                         });
 
-                        // Остальное время - дефолтным цветом
                         const otherSec = entry.active - totalShownSec;
                         if (otherSec > 0) {
                             const seg = document.createElement('div');
@@ -619,7 +612,6 @@
             if (name === currentHighlight) return;
             currentHighlight = name;
 
-            // Всегда очищаем предыдущий хайлайт
             document.querySelectorAll('.fill.highlight').forEach(el => el.classList.remove('highlight'));
             document.querySelectorAll('#legendTable tr.legend-highlight').forEach(el => el.classList.remove('legend-highlight'));
 
@@ -627,12 +619,10 @@
 
             const escaped = name.replace(/"/g, '\\"');
 
-            // Мигаем на гриде
             document.querySelectorAll(`.fill[data-window="${escaped}"]`).forEach(el => {
                 el.classList.add('highlight');
             });
 
-            // Подсвечиваем строку в таблице
             const row = document.querySelector(`#legendTable tr[data-window="${escaped}"]`);
             if (row) {
                 row.classList.add('legend-highlight');
