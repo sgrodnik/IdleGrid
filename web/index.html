@@ -202,7 +202,7 @@
 </head>
 <body>
     <div class="controls">
-        <button id="btnOpen">Open Log Folder</button>
+        <button id="btnOpen">Choose Folder</button>
         <button id="btnSettings">Settings</button>
         <span id="status"></span>
     </div>
@@ -261,15 +261,47 @@
         const grid = document.getElementById('grid');
         const tooltip = document.getElementById('tooltip');
         let directoryHandle;
-        let logsFolderHandle; // Handle for the actual 'logs' subfolder
-        let data = {}; // date_hour_min -> { active, windows }
-        let windowColors = {}; // windowName -> color (assigned by daily rank)
+        let logsFolderHandle;
+        let data = {};
+        let windowColors = {};
+
+        // IndexedDB for handle persistence
+        async function getDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open('idlegrid-db', 1);
+                request.onupgradeneeded = () => request.result.createObjectStore('handles');
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+        async function saveHandle(handle) {
+            const db = await getDB();
+            const tx = db.transaction('handles', 'readwrite');
+            tx.objectStore('handles').put(handle, 'folder');
+        }
+        async function loadHandle() {
+            try {
+                const db = await getDB();
+                const tx = db.transaction('handles', 'readonly');
+                return new Promise(r => {
+                    const req = tx.objectStore('handles').get('folder');
+                    req.onsuccess = () => r(req.result);
+                    req.onerror = () => r(null);
+                });
+            } catch(e) { return null; }
+        }
+        async function deleteHandle() {
+            const db = await getDB();
+            const tx = db.transaction('handles', 'readwrite');
+            tx.objectStore('handles').delete('folder');
+        }
 
         const defaultConfig = {
-            GAP_LIMIT: 5,         // minutes of inactivity to break a session
-            ACTIVE_THRESHOLD: 5,  // seconds in a minute to consider it "work"
-            WORK_START: 7,        // hour to start highlighting
-            WORK_END: 19          // hour to end highlighting
+            GAP_LIMIT: 5,
+            ACTIVE_THRESHOLD: 5,
+            WORK_START: 7,
+            WORK_END: 19,
+            FOLDER: ""
         };
 
         let config = { ...defaultConfig };
@@ -333,7 +365,17 @@
             }
 
             renderGrid();
-            document.getElementById('btnOpen').onclick = openFolder;
+
+            const btnOpen = document.getElementById('btnOpen');
+            // Handle persistence
+            const savedHandle = await loadHandle();
+            if (savedHandle) {
+                directoryHandle = savedHandle;
+                btnOpen.textContent = 'Restore Access';
+                if (!config.FOLDER) config.FOLDER = directoryHandle.name;
+            }
+
+            btnOpen.onclick = openFolder;
 
             // Settings Logic
             const overlay = document.getElementById('settingsOverlay');
@@ -343,15 +385,35 @@
                 txt.value = JSON.stringify(config, null, 4);
                 overlay.style.display = 'block';
             };
+
+            const closeSettings = () => overlay.style.display = 'none';
+
             document.getElementById('btnResetSettings').onclick = () => {
                 txt.value = JSON.stringify(defaultConfig, null, 4);
             };
-            document.getElementById('btnCloseSettings').onclick = () => overlay.style.display = 'none';
-            document.getElementById('btnSaveSettings').onclick = () => {
+            document.getElementById('btnCloseSettings').onclick = closeSettings;
+
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && overlay.style.display === 'block') closeSettings();
+            });
+
+            document.getElementById('btnSaveSettings').onclick = async () => {
                 try {
-                    config = JSON.parse(txt.value);
+                    const newConfig = JSON.parse(txt.value);
+
+                    // Logic to clear folder via JSON
+                    if (config.FOLDER && !newConfig.FOLDER) {
+                        await deleteHandle();
+                        directoryHandle = null;
+                        logsFolderHandle = null;
+                        btnOpen.style.display = 'inline-block';
+                        btnOpen.textContent = 'Choose Folder';
+                        document.getElementById('status').textContent = ' No folder selected.';
+                    }
+
+                    config = newConfig;
                     localStorage.setItem('ig-config', JSON.stringify(config));
-                    overlay.style.display = 'none';
+                    closeSettings();
                     renderGrid();
                     if (logsFolderHandle) reloadData();
                 } catch(e) {
@@ -436,7 +498,24 @@
 
         async function openFolder() {
             try {
-                directoryHandle = await window.showDirectoryPicker();
+                const btnOpen = document.getElementById('btnOpen');
+                const isRestoring = btnOpen.textContent === 'Restore Access';
+
+                if (isRestoring && directoryHandle) {
+                    const opts = { mode: 'readwrite' };
+                    if (await directoryHandle.queryPermission(opts) !== 'granted') {
+                        if (await directoryHandle.requestPermission(opts) !== 'granted') {
+                            directoryHandle = await window.showDirectoryPicker();
+                        }
+                    }
+                } else {
+                    directoryHandle = await window.showDirectoryPicker();
+                }
+
+                await saveHandle(directoryHandle);
+                btnOpen.style.display = 'none';
+                config.FOLDER = directoryHandle.name;
+                localStorage.setItem('ig-config', JSON.stringify(config));
 
                 // Try to find logs folder in common locations
                 logsFolderHandle = null;
