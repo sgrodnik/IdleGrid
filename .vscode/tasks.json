@@ -1,0 +1,22 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build Daemon",
+			"type": "shell",
+			"command": "dotnet build IdleGridDaemon/IdleGridDaemon.csproj",
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Run Daemon",
+			"type": "shell",
+			"command": "dotnet run --project IdleGridDaemon/IdleGridDaemon.csproj",
+			"problemMatcher": [
+				"$msCompile"
+			]
+		}
+	]
+}

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IdleGrid</title>
+    <style>
+        :root {
+            --bg-color: #ffffff;
+            --border-color: #000000;
+            --fill-color: #333333;
+            --grid-line: #eeeeee;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-color);
+            margin: 20px;
+            font-size: 12px;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        button {
+            border: 1px solid var(--border-color);
+            background: white;
+            padding: 5px 15px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        button:hover { background: #f0f0f0; }
+
+        .grid-container {
+            display: inline-grid;
+            grid-template-columns: 40px repeat(60, 12px);
+            gap: 0;
+            border-top: 1px solid var(--border-color);
+            border-left: 1px solid var(--border-color);
+        }
+        .hour-label {
+            grid-column: 1;
+            height: 25px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 5px;
+            border-bottom: 1px solid var(--border-color);
+            border-right: 1px solid var(--border-color);
+            background: #fdfdfd;
+            cursor: help;
+        }
+        .minute-block {
+            width: 12px;
+            height: 25px;
+            border-bottom: 1px solid var(--border-color);
+            border-right: 1px solid var(--border-color);
+            position: relative;
+            background: #ffffff;
+        }
+        .fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--fill-color);
+        }
+        .tooltip {
+            position: fixed;
+            background: black;
+            color: white;
+            padding: 8px;
+            border: 1px solid white;
+            z-index: 1000;
+            display: none;
+            pointer-events: none;
+            max-width: 300px;
+            white-space: pre-line;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button id="btnOpen">Open Log Folder</button>
+        <span id="status"></span>
+    </div>
+    <div id="grid" class="grid-container"></div>
+    <div id="tooltip" class="tooltip"></div>
+
+    <script>
+        const grid = document.getElementById('grid');
+        const tooltip = document.getElementById('tooltip');
+        let directoryHandle;
+        let data = {}; // date_hour_min -> { active, windows }
+
+        async function init() {
+            renderGrid();
+            document.getElementById('btnOpen').onclick = openFolder;
+
+            // Sync reload with the start of the next minute
+            const now = new Date();
+            const delay = (60 - now.getSeconds()) * 1000 + 500; // Next minute + 0.5s buffer
+            setTimeout(() => {
+                reloadData();
+                setInterval(reloadData, 60000);
+            }, delay);
+        }
+
+        function renderGrid() {
+            grid.innerHTML = '';
+            for (let h = 0; h < 24; h++) {
+                const hourLabel = document.createElement('div');
+                hourLabel.className = 'hour-label';
+                hourLabel.textContent = `${String(h).padStart(2, '0')}:00`;
+                hourLabel.onmouseenter = (e) => showHourSummary(e, h);
+                grid.appendChild(hourLabel);
+
+                for (let m = 0; m < 60; m++) {
+                    const minBlock = document.createElement('div');
+                    minBlock.className = 'minute-block';
+                    minBlock.id = `m-${h}-${m}`;
+                    minBlock.onmouseenter = (e) => showMinuteDetails(e, h, m);
+                    minBlock.onmouseleave = () => tooltip.style.display = 'none';
+                    const fill = document.createElement('div');
+                    fill.className = 'fill';
+                    minBlock.appendChild(fill);
+                    grid.appendChild(minBlock);
+                }
+            }
+        }
+
+        async function openFolder() {
+            try {
+                directoryHandle = await window.showDirectoryPicker();
+                document.getElementById('status').textContent = ' Monitoring: ' + directoryHandle.name;
+                await reloadData();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function reloadData() {
+            if (!directoryHandle) return;
+            const now = new Date();
+            const fileName = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}.log`;
+
+            try {
+                const fileHandle = await directoryHandle.getFileHandle(fileName);
+                const file = await fileHandle.getFile();
+                const text = await file.text();
+                parseLogs(text);
+                updateVisuals();
+            } catch (e) {
+                console.warn("Log file for today not found yet.");
+            }
+        }
+
+        function parseLogs(text) {
+            const lines = text.split('\n');
+            data = {};
+            lines.forEach(line => {
+                const parts = line.split('|');
+                if (parts.length < 3) return;
+                const time = parts[0]; // yyyy-MM-dd HH:mm
+                const active = parseInt(parts[1]);
+                const windows = JSON.parse(parts[2]);
+
+                const hour = parseInt(time.split(' ')[1].split(':')[0]);
+                const min = parseInt(time.split(' ')[1].split(':')[1]);
+                data[`${hour}-${min}`] = { active, windows };
+            });
+        }
+
+        function updateVisuals() {
+            for (let h = 0; h < 24; h++) {
+                for (let m = 0; m < 60; m++) {
+                    const block = document.getElementById(`m-${h}-${m}`);
+                    const fill = block.querySelector('.fill');
+                    const entry = data[`${h}-${m}`];
+                    const percent = entry ? (entry.active / 60) * 100 : 0;
+                    fill.style.height = `${percent}%`;
+                }
+            }
+        }
+
+        function showMinuteDetails(e, h, m) {
+            const entry = data[`${h}-${m}`];
+            if (!entry) return;
+
+            let html = `Minute ${h}:${String(m).padStart(2, '0')}\nActive: ${entry.active}s\n\n`;
+            for (const [win, sec] of Object.entries(entry.windows)) {
+                html += `${sec}s - ${win.substring(0, 50)}\n`;
+            }
+            showTooltip(e, html);
+        }
+
+        function showHourSummary(e, h) {
+            let totalActive = 0;
+            const windowAgg = {};
+            for (let m = 0; m < 60; m++) {
+                const entry = data[`${h}-${m}`];
+                if (entry) {
+                    totalActive += entry.active;
+                    for (const [win, sec] of Object.entries(entry.windows)) {
+                        windowAgg[win] = (windowAgg[win] || 0) + sec;
+                    }
+                }
+            }
+
+            let html = `Hour ${h}:00 Summary\nTotal Active: ${Math.round(totalActive/60)}m\n\n`;
+            Object.entries(windowAgg)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 10)
+                .forEach(([win, sec]) => {
+                    html += `${Math.round(sec/60)}m - ${win.substring(0, 50)}\n`;
+                });
+            showTooltip(e, html);
+        }
+
+        function showTooltip(e, text) {
+            tooltip.textContent = text;
+            tooltip.style.display = 'block';
+            tooltip.style.left = (e.clientX + 15) + 'px';
+            tooltip.style.top = (e.clientY + 15) + 'px';
+        }
+
+        init();
+    </script>
+</body>
+</html>
