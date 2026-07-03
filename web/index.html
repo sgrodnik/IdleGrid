@@ -133,6 +133,7 @@
         const grid = document.getElementById('grid');
         const tooltip = document.getElementById('tooltip');
         let directoryHandle;
+        let logsFolderHandle; // Handle for the actual 'logs' subfolder
         let data = {}; // date_hour_min -> { active, windows }
 
         // Setup Resizing
@@ -256,7 +257,41 @@
         async function openFolder() {
             try {
                 directoryHandle = await window.showDirectoryPicker();
-                document.getElementById('status').textContent = ' Monitoring: ' + directoryHandle.name;
+
+                // Try to find logs folder in common locations
+                logsFolderHandle = null;
+
+                async function findLogs(handle) {
+                    // 1. Is it this folder?
+                    try {
+                        // Check if any .log file exists here to confirm
+                        for await (const entry of handle.values()) {
+                            if (entry.kind === 'file' && entry.name.endsWith('.log')) return handle;
+                        }
+                    } catch(e) {}
+
+                    // 2. Is it in 'logs' subfolder?
+                    try {
+                        return await handle.getDirectoryHandle('logs');
+                    } catch(e) {}
+
+                    // 3. Is it in 'IdleGrid/logs'?
+                    try {
+                        const ig = await handle.getDirectoryHandle('IdleGrid');
+                        return await ig.getDirectoryHandle('logs');
+                    } catch(e) {}
+
+                    return null;
+                }
+
+                logsFolderHandle = await findLogs(directoryHandle);
+
+                if (!logsFolderHandle) {
+                    // If nothing found, stick with the selected folder
+                    logsFolderHandle = directoryHandle;
+                }
+
+                document.getElementById('status').textContent = ' Monitoring: ' + (logsFolderHandle === directoryHandle ? directoryHandle.name : '.../' + logsFolderHandle.name);
                 await reloadData();
             } catch (err) {
                 console.error(err);
@@ -264,12 +299,12 @@
         }
 
         async function reloadData() {
-            if (!directoryHandle) return;
+            if (!logsFolderHandle) return;
             const now = new Date();
             const fileName = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}.log`;
 
             try {
-                const fileHandle = await directoryHandle.getFileHandle(fileName);
+                const fileHandle = await logsFolderHandle.getFileHandle(fileName);
                 const file = await fileHandle.getFile();
                 const text = await file.text();
                 parseLogs(text);
