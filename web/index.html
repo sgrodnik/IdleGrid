@@ -246,10 +246,10 @@
                 <tbody>
                     <tr><th>Day Start</th><td id="statDayStart">-</td></tr>
                     <tr><th>Work Duration</th><td id="statWorkDayTotal">-</td></tr>
-                    <tr><th>Total Active</th><td id="statTotalActive">-</td></tr>
+                    <tr><th>Active Time</th><td id="statActiveTime">-</td></tr>
                     <tr><th>Longest Streak</th><td id="statMaxStreak">-</td></tr>
-                    <tr><th>Current Session</th><td id="statCurrentStreak">-</td></tr>
                     <tr><th>Longest Break</th><td id="statMaxBreak">-</td></tr>
+                    <tr><th>Current Session</th><td id="statCurrentStreak">-</td></tr>
                 </tbody>
             </table>
         </div>
@@ -532,7 +532,7 @@
         function analyzeSessions() {
             let sessions = [];
             let currentSession = null;
-            let totalActiveSec = 0;
+            let activeMinutes = 0;
 
             const minutesWithData = Object.keys(data).map(k => {
                 const [h, m] = k.split('-').map(Number);
@@ -540,8 +540,8 @@
             }).sort((a, b) => a.totalMin - b.totalMin);
 
             minutesWithData.forEach(m => {
-                totalActiveSec += m.active;
                 if (m.active >= config.ACTIVE_THRESHOLD) {
+                    activeMinutes++;
                     if (!currentSession) {
                         currentSession = { start: m.totalMin, last: m.totalMin };
                     } else if (m.totalMin - currentSession.last > config.GAP_LIMIT) {
@@ -601,10 +601,10 @@
                 document.getElementById('statCurrentStreak').textContent = `${currentStreakVal}m`;
             }
 
-            // Total Active (pure time)
-            const totalHours = Math.floor(totalActiveSec / 3600);
-            const totalMins = Math.floor((totalActiveSec % 3600) / 60);
-            document.getElementById('statTotalActive').textContent = `${totalHours}h ${totalMins}m`;
+            // Active Time (sum of active minutes)
+            const activeH = Math.floor(activeMinutes / 60);
+            const activeM = activeMinutes % 60;
+            document.getElementById('statActiveTime').textContent = `${activeH}h ${activeM}m`;
         }
 
         function updateLegend(sortedData) {
