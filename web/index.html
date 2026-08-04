@@ -444,6 +444,13 @@
                 directoryHandle = savedHandle;
                 btnOpen.textContent = 'Restore Access (Esc)';
                 if (!config.FOLDER) config.FOLDER = directoryHandle.name;
+
+                try {
+                    const permission = await directoryHandle.queryPermission({ mode: 'readwrite' });
+                    if (permission === 'granted') await openFolder();
+                } catch (e) {
+                    console.warn('Could not automatically restore folder access:', e);
+                }
             }
 
             btnOpen.onclick = openFolder;
