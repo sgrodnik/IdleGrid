@@ -76,6 +76,9 @@
             display: flex;
             flex-direction: column-reverse;
         }
+        .grid-hidden {
+            display: none;
+        }
         .fill {
             width: 100%;
             background: var(--fill-color);
@@ -559,6 +562,7 @@
 
                 const hourLabel = document.createElement('div');
                 hourLabel.className = 'hour-label';
+                hourLabel.dataset.hour = h;
                 hourLabel.style.setProperty('--h-mult', hMult);
                 hourLabel.textContent = `${String(h).padStart(2, '0')}:00`;
                 hourLabel.onmouseenter = (e) => showHourSummary(e, h);
@@ -567,6 +571,7 @@
                 for (let m = 0; m < 60; m++) {
                     const minBlock = document.createElement('div');
                     minBlock.className = 'minute-block';
+                    minBlock.dataset.hour = h;
                     minBlock.style.setProperty('--h-mult', hMult);
                     minBlock.id = `m-${h}-${m}`;
                     minBlock.onmouseenter = (e) => showMinuteDetails(e, h, m);
@@ -576,6 +581,18 @@
                     minBlock.appendChild(fill);
                     grid.appendChild(minBlock);
                 }
+            }
+            updateGridVisibility();
+        }
+
+        function updateGridVisibility() {
+            const hoursWithData = new Set(Object.keys(data).map(key => Number(key.split('-')[0])));
+            for (let hour = 0; hour < 24; hour++) {
+                const isWorkHour = hour >= config.WORK_START && hour < config.WORK_END;
+                const hidden = !isWorkHour && !hoursWithData.has(hour);
+                grid.querySelectorAll(`[data-hour="${hour}"]`).forEach(element => {
+                    element.classList.toggle('grid-hidden', hidden);
+                });
             }
         }
 
@@ -660,6 +677,7 @@
                 console.warn("Log file for selected date not found:", fileName);
                 data = {}; // Clear data
                 updateVisuals(); // Update UI to show empty grid
+                updateGridVisibility();
                 // Reset stats displays
                 ['statDayStart','statDayEnd','statWorkDayTotal','statActiveTime','statMaxStreak','statMaxBreak','statCurrentStreak','statLastBreak'].forEach(id => {
                     document.getElementById(id).textContent = '-';
@@ -690,6 +708,8 @@
                     globalAgg[win] = (globalAgg[win] || 0) + sec;
                 }
             });
+
+            updateGridVisibility();
 
             // Assign colors based on total duration rank
             windowColors = {};
