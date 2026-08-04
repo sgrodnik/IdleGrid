@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Drawing;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Timers;
@@ -116,6 +117,8 @@ namespace IdleGridDaemon
             Console.WriteLine("Monitoring...");
 
             _currentMinute = GetRoundedMinute(DateTime.Now);
+            RestoreSessionFromLog();
+            UpdateSession(DateTime.Now);
 
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SystemEvents.SessionSwitch += OnSessionSwitch;
@@ -160,6 +163,43 @@ namespace IdleGridDaemon
         }
 
         private static DateTime GetRoundedMinute(DateTime dt) => new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, 0);
+
+        private static void RestoreSessionFromLog()
+        {
+            var filePath = Path.Combine(_logDir, $"{DateTime.Today:yyyy-MM-dd}.log");
+            if (!File.Exists(filePath)) return;
+
+            var activeMinutes = new List<DateTime>();
+
+            try
+            {
+                foreach (var line in File.ReadLines(filePath))
+                {
+                    var parts = line.Split('|', 3);
+                    if (parts.Length < 2 ||
+                        !DateTime.TryParseExact(parts[0], "HH:mm", CultureInfo.InvariantCulture,
+                            DateTimeStyles.None, out var time) ||
+                        !int.TryParse(parts[1], out var activeSeconds) ||
+                        activeSeconds < _config.ACTIVE_THRESHOLD)
+                        continue;
+
+                    activeMinutes.Add(DateTime.Today.AddHours(time.Hour).AddMinutes(time.Minute));
+                }
+
+                foreach (var minute in activeMinutes.OrderBy(x => x))
+                {
+                    if (!_sessionStartMinute.HasValue || !_lastSessionMinute.HasValue ||
+                        (minute - _lastSessionMinute.Value).TotalMinutes > _config.GAP_LIMIT)
+                        _sessionStartMinute = minute;
+
+                    _lastSessionMinute = minute;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Error restoring session: {ex.Message}");
+            }
+        }
 
         private static void OnTick(object? sender, ElapsedEventArgs e)
         {
