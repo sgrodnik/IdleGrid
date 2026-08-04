@@ -164,8 +164,8 @@ namespace IdleGridDaemon
             using var g = Graphics.FromImage(bmp);
             using var font = new Font(
                 "Segoe UI",
-                sessionMinutes >= 100 ? 16 : sessionMinutes >= 10 ? 24 : 32,
-                FontStyle.Regular,
+                sessionMinutes >= 10 ? 20 : 24,
+                FontStyle.Bold,
                 GraphicsUnit.Pixel);
             using var format = new StringFormat
             {
