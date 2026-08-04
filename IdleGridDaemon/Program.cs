@@ -54,6 +54,8 @@ namespace IdleGridDaemon
         private static NotifyIcon _trayIcon = null!;
         private static Icon _activeIcon = null!;
         private static Icon _idleIcon = null!;
+        private static Icon? _sessionIcon;
+        private static int _displayedSessionMinutes = -1;
 
         private sealed class AppConfig
         {
@@ -114,6 +116,14 @@ namespace IdleGridDaemon
                 Application.Exit();
             });
 
+            Application.ApplicationExit += (s, e) =>
+            {
+                _trayIcon.Dispose();
+                _sessionIcon?.Dispose();
+                _activeIcon.Dispose();
+                _idleIcon.Dispose();
+            };
+
             if (!configLoaded)
                 ShowError("Could not read config.json. Default configuration is active.");
             StartConfigWatcher();
@@ -145,6 +155,34 @@ namespace IdleGridDaemon
             {
                 g.Clear(color);
             }
+            return Icon.FromHandle(bmp.GetHicon());
+        }
+
+        private static Icon CreateSessionIcon(int sessionMinutes)
+        {
+            using var bmp = new Bitmap(32, 32);
+            using var g = Graphics.FromImage(bmp);
+            using var font = new Font(
+                "Segoe UI",
+                sessionMinutes >= 100 ? 16 : sessionMinutes >= 10 ? 24 : 32,
+                FontStyle.Bold,
+                GraphicsUnit.Pixel);
+            using var format = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center
+            };
+
+            g.Clear(sessionMinutes > 0 ? Color.LimeGreen : Color.Gray);
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            var label = sessionMinutes >= 100
+                ? "99+"
+                : sessionMinutes.ToString(CultureInfo.InvariantCulture);
+            var textBounds = new RectangleF(0, 0, bmp.Width, bmp.Height);
+            g.DrawString(label, font, Brushes.Black, new RectangleF(1, 1, 32, 32), format);
+            g.DrawString(label, font, Brushes.White, textBounds, format);
+
             return Icon.FromHandle(bmp.GetHicon());
         }
 
@@ -227,7 +265,6 @@ namespace IdleGridDaemon
                 }
 
                 bool isActive = IsUserActive();
-                _trayIcon.Icon = isActive ? _activeIcon : _idleIcon;
 
                 if (isActive)
                 {
@@ -289,6 +326,16 @@ namespace IdleGridDaemon
 
             var lastBreak = _lastBreakMinutes.HasValue ? $"{_lastBreakMinutes}m" : "-";
             _trayIcon.Text = $"Current Session: {sessionMinutes}m | Last Break: {lastBreak}";
+
+            if (sessionMinutes != _displayedSessionMinutes)
+            {
+                var newIcon = CreateSessionIcon(sessionMinutes);
+                var oldIcon = _sessionIcon;
+                _sessionIcon = newIcon;
+                _trayIcon.Icon = newIcon;
+                _displayedSessionMinutes = sessionMinutes;
+                oldIcon?.Dispose();
+            }
         }
 
         private static bool HasRecentUserInput(DateTime now)
