@@ -728,10 +728,13 @@
                 // Day Start
                 document.getElementById('statDayStart').textContent = toTime(startMin);
 
-                // Work Day Duration (from first start to now/last activity)
+                // Work Day Duration (to now for today, or to the last activity for history)
                 const now = new Date();
-                const nowMin = now.getHours() * 60 + now.getMinutes();
-                const duration = Math.max(0, nowMin - startMin);
+                const isToday = viewDate.toDateString() === now.toDateString();
+                const endForDuration = isToday
+                    ? now.getHours() * 60 + now.getMinutes()
+                    : endMin;
+                const duration = Math.max(0, endForDuration - startMin);
                 const durH = Math.floor(duration/60);
                 const durM = duration % 60;
                 document.getElementById('statWorkDayTotal').textContent = `${durH}h ${durM}m`;
@@ -758,14 +761,16 @@
                 document.getElementById('statMaxBreak').textContent = `${maxBreak}m`;
 
                 // Current Session
-                let currentStreakVal = 0;
                 const lastSession = sessions[sessions.length - 1];
-                if (nowMin - lastSession.last <= config.GAP_LIMIT) {
-                    currentStreakVal = nowMin - lastSession.start;
-                }
+                const nowMin = now.getHours() * 60 + now.getMinutes();
+                const currentStreakVal = isToday
+                    ? (nowMin - lastSession.last <= config.GAP_LIMIT
+                        ? Math.max(0, nowMin - lastSession.start)
+                        : 0)
+                    : lastSession.last - lastSession.start + 1;
                 document.getElementById('statCurrentStreak').textContent = `${currentStreakVal}m`;
 
-                const lastBreakVal = currentStreakVal > 0 && sessions.length > 1
+                const lastBreakVal = (!isToday || currentStreakVal > 0) && sessions.length > 1
                     ? lastSession.start - sessions[sessions.length - 2].last
                     : null;
                 document.getElementById('statLastBreak').textContent =
