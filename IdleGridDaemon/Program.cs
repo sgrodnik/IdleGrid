@@ -56,6 +56,7 @@ namespace IdleGridDaemon
         private static Icon _idleIcon = null!;
         private static Icon? _sessionIcon;
         private static int _displayedSessionMinutes = -1;
+        private static bool _displayedUserActive;
 
         private sealed class AppConfig
         {
@@ -134,7 +135,7 @@ namespace IdleGridDaemon
 
             _currentMinute = GetRoundedMinute(DateTime.Now);
             RestoreSessionFromLog();
-            UpdateSession(DateTime.Now);
+            UpdateSession(DateTime.Now, IsUserActive());
 
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SystemEvents.SessionSwitch += OnSessionSwitch;
@@ -158,7 +159,7 @@ namespace IdleGridDaemon
             return Icon.FromHandle(bmp.GetHicon());
         }
 
-        private static Icon CreateSessionIcon(int sessionMinutes)
+        private static Icon CreateSessionIcon(int sessionMinutes, bool isUserActive)
         {
             using var bmp = new Bitmap(32, 32);
             using var g = Graphics.FromImage(bmp);
@@ -173,7 +174,10 @@ namespace IdleGridDaemon
                 LineAlignment = StringAlignment.Center
             };
 
-            g.Clear(sessionMinutes > 0 ? Color.LimeGreen : Color.Gray);
+            var backgroundColor = sessionMinutes > _config.BREAK_REMINDER_TIMER
+                ? Color.Crimson
+                : isUserActive ? Color.DimGray : Color.Transparent;
+            g.Clear(backgroundColor);
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
             var label = sessionMinutes >= 100
@@ -280,11 +284,11 @@ namespace IdleGridDaemon
                     }
                 }
 
-                UpdateSession(now);
+                UpdateSession(now, isActive);
             }
         }
 
-        private static void UpdateSession(DateTime now)
+        private static void UpdateSession(DateTime now, bool isUserActive)
         {
             if (_activeSecondsInMinute >= _config.ACTIVE_THRESHOLD && _lastSessionMinute != _currentMinute)
             {
@@ -331,13 +335,14 @@ namespace IdleGridDaemon
             var lastBreak = _lastBreakMinutes.HasValue ? $"{_lastBreakMinutes}m" : "-";
             _trayIcon.Text = $"Current Session: {sessionMinutes}m | Last Break: {lastBreak}";
 
-            if (sessionMinutes != _displayedSessionMinutes)
+            if (sessionMinutes != _displayedSessionMinutes || isUserActive != _displayedUserActive)
             {
-                var newIcon = CreateSessionIcon(sessionMinutes);
+                var newIcon = CreateSessionIcon(sessionMinutes, isUserActive);
                 var oldIcon = _sessionIcon;
                 _sessionIcon = newIcon;
                 _trayIcon.Icon = newIcon;
                 _displayedSessionMinutes = sessionMinutes;
+                _displayedUserActive = isUserActive;
                 oldIcon?.Dispose();
             }
         }
