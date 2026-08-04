@@ -442,7 +442,7 @@
             const savedHandle = await loadHandle();
             if (savedHandle) {
                 directoryHandle = savedHandle;
-                btnOpen.textContent = 'Restore Access';
+                btnOpen.textContent = 'Restore Access (Esc)';
                 if (!config.FOLDER) config.FOLDER = directoryHandle.name;
             }
 
@@ -465,7 +465,13 @@
             document.getElementById('btnCloseSettings').onclick = closeSettings;
 
             window.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && overlay.style.display === 'block') closeSettings();
+                if (e.key !== 'Escape') return;
+                if (overlay.style.display === 'block') {
+                    closeSettings();
+                } else if (btnOpen.style.display !== 'none' && btnOpen.textContent === 'Restore Access (Esc)') {
+                    e.preventDefault();
+                    openFolder();
+                }
             });
 
             document.getElementById('btnSaveSettings').onclick = async () => {
@@ -599,7 +605,7 @@
         async function openFolder() {
             try {
                 const btnOpen = document.getElementById('btnOpen');
-                const isRestoring = btnOpen.textContent === 'Restore Access';
+                const isRestoring = btnOpen.textContent === 'Restore Access (Esc)';
 
                 if (isRestoring && directoryHandle) {
                     const opts = { mode: 'readwrite' };
@@ -658,7 +664,7 @@
 
                 const btnOpen = document.getElementById('btnOpen');
                 btnOpen.style.display = 'inline-block';
-                btnOpen.textContent = 'Restore Access';
+                btnOpen.textContent = 'Restore Access (Esc)';
                 alert(`Could not load IdleGrid configuration: ${err.message}`);
             }
         }
