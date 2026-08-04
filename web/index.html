@@ -732,7 +732,10 @@
             const toTime = (totalMin) => `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
 
             if (sessions.length > 0) {
-                const startMin = sessions[0].start;
+                const firstSession = sessions.length > 1 && sessions[0].start === sessions[0].last
+                    ? sessions[1]
+                    : sessions[0];
+                const startMin = firstSession.start;
                 const endMin = sessions[sessions.length - 1].last;
 
                 // Day Start
