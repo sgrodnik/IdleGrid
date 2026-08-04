@@ -165,7 +165,7 @@ namespace IdleGridDaemon
             using var font = new Font(
                 "Segoe UI",
                 sessionMinutes >= 100 ? 16 : sessionMinutes >= 10 ? 24 : 32,
-                FontStyle.Bold,
+                FontStyle.Regular,
                 GraphicsUnit.Pixel);
             using var format = new StringFormat
             {
@@ -213,7 +213,7 @@ namespace IdleGridDaemon
             var filePath = Path.Combine(_logDir, $"{DateTime.Today:yyyy-MM-dd}.log");
             if (!File.Exists(filePath)) return;
 
-            var activeMinutes = new List<DateTime>();
+            var activeSecondsByMinute = new Dictionary<DateTime, int>();
 
             try
             {
@@ -223,15 +223,19 @@ namespace IdleGridDaemon
                     if (parts.Length < 2 ||
                         !DateTime.TryParseExact(parts[0], "HH:mm", CultureInfo.InvariantCulture,
                             DateTimeStyles.None, out var time) ||
-                        !int.TryParse(parts[1], out var activeSeconds) ||
-                        activeSeconds < _config.ACTIVE_THRESHOLD)
+                        !int.TryParse(parts[1], out var activeSeconds))
                         continue;
 
-                    activeMinutes.Add(DateTime.Today.AddHours(time.Hour).AddMinutes(time.Minute));
+                    var minute = DateTime.Today.AddHours(time.Hour).AddMinutes(time.Minute);
+                    activeSecondsByMinute[minute] = activeSeconds;
                 }
 
-                foreach (var minute in activeMinutes.OrderBy(x => x))
+                foreach (var entry in activeSecondsByMinute.OrderBy(x => x.Key))
                 {
+                    if (entry.Value < _config.ACTIVE_THRESHOLD)
+                        continue;
+
+                    var minute = entry.Key;
                     if (!_sessionStartMinute.HasValue || !_lastSessionMinute.HasValue ||
                         (minute - _lastSessionMinute.Value).TotalMinutes > _config.GAP_LIMIT)
                     {
