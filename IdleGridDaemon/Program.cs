@@ -6,6 +6,7 @@ using System.Linq;
 using System.Drawing;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Timers;
 using System.Windows.Forms;
@@ -109,12 +110,12 @@ namespace IdleGridDaemon
             });
 
             if (!configLoaded)
-                ShowConfigLoadError();
+                ShowError("Could not read config.json. Default configuration is active.");
             StartConfigWatcher();
 
-            Console.WriteLine($"IdleGrid Daemon started.");
-            Console.WriteLine($"Logs directory: {_logDir}");
-            Console.WriteLine("Monitoring...");
+            Log.Info("IdleGrid Daemon started.");
+            Log.Info($"Logs directory: {_logDir}");
+            Log.Info("Monitoring...");
 
             _currentMinute = GetRoundedMinute(DateTime.Now);
             RestoreSessionFromLog();
@@ -197,7 +198,8 @@ namespace IdleGridDaemon
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Error restoring session: {ex.Message}");
+                Log.Error("Error restoring session from log", ex);
+                ShowError("Could not restore the current session from today's log.");
             }
         }
 
@@ -210,7 +212,7 @@ namespace IdleGridDaemon
 
                 if (minute > _currentMinute)
                 {
-                    Console.WriteLine($"[{now:HH:mm:ss}] Starting new minute: {minute:HH:mm}");
+                    Log.Debug($"Starting new minute: {minute:HH:mm}");
                     FlushData();
                     _currentMinute = minute;
                 }
@@ -298,17 +300,18 @@ namespace IdleGridDaemon
                     Thread.Sleep(250);
             }
 
-            ShowConfigLoadError();
+            Log.Error("Could not read config.json after three attempts.");
+            ShowError("Could not read config.json. The previous configuration is still active.");
         }
 
-        private static void ShowConfigLoadError()
+        private static void ShowError(string message)
         {
             if (_trayIcon == null) return;
 
             _trayIcon.ShowBalloonTip(
                 5000,
-                "IdleGrid configuration",
-                "Could not read config.json. The previous configuration is still active.",
+                "IdleGrid error",
+                message,
                 ToolTipIcon.Warning);
         }
 
@@ -322,14 +325,17 @@ namespace IdleGridDaemon
                     if (loaded != null && loaded.ACTIVE_THRESHOLD >= 0 && loaded.GAP_LIMIT >= 0)
                         _config = loaded;
                     else
+                    {
+                        Log.Error("config.json is empty or contains invalid values.");
                         return false;
+                    }
                 }
 
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Error reading config: {ex.Message}");
+                Log.Error("Error reading config.json", ex);
                 return false;
             }
         }
@@ -379,12 +385,12 @@ namespace IdleGridDaemon
             try
             {
                 File.AppendAllLines(filePath, new[] { logLine });
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Logged: {_activeSecondsInMinute}s active in {_currentMinute:HH:mm}. File: {fileName}");
+                Log.Debug($"Logged: {_activeSecondsInMinute}s active in {_currentMinute:HH:mm}. File: {fileName}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Error writing log: {ex.Message}");
-                Debug.WriteLine($"Failed to write log: {ex.Message}");
+                Log.Error($"Error writing activity log {fileName}", ex);
+                ShowError("Could not write today's activity log.");
             }
 
             _activeSecondsInMinute = 0;
@@ -399,6 +405,48 @@ namespace IdleGridDaemon
         private static void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
         {
             if (e.Reason == SessionSwitchReason.SessionLock || e.Reason == SessionSwitchReason.SessionLogoff) FlushData();
+        }
+    }
+
+    static class Log
+    {
+        private static readonly string LogPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "IdleGrid",
+            "Daemon.log");
+        private static readonly object Sync = new();
+
+        public static void Info(string message) => Write("INFO", message);
+
+        public static void Error(string message, Exception? exception = null)
+        {
+            var details = exception == null ? message : $"{message}: {exception}";
+            Write("ERROR", details);
+        }
+
+        public static void Debug(string message, [CallerLineNumber] int line = 0)
+        {
+            Write("DEBUG", $"L{line}: {message}");
+        }
+
+        private static void Write(string level, string message)
+        {
+            var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}";
+
+            try
+            {
+                lock (Sync)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
+                    File.AppendAllText(LogPath, line + Environment.NewLine);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Could not write daemon log: {ex}");
+            }
+
+            Console.WriteLine(line);
         }
     }
 }
