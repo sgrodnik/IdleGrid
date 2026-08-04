@@ -43,6 +43,8 @@ namespace IdleGridDaemon
         private static DateTime _currentMinute;
         private static DateTime? _sessionStartMinute;
         private static DateTime? _lastSessionMinute;
+        private static DateTime? _lastBreakReminderAt;
+        private static DateTime? _reminderSessionStart;
         private static AppConfig _config = new();
         private static FileSystemWatcher? _configWatcher;
         private static System.Threading.Timer? _configReloadTimer;
@@ -59,6 +61,8 @@ namespace IdleGridDaemon
             public int WORK_START { get; set; } = 7;
             public int WORK_END { get; set; } = 19;
             public string FOLDER { get; set; } = "IdleGrid";
+            public int BREAK_REMINDER_TIMER { get; set; } = 50;
+            public int BREAK_REMINDER_INTERVAL { get; set; } = 5;
         }
 
         static void Main(string[] args)
@@ -249,7 +253,53 @@ namespace IdleGridDaemon
                 (GetRoundedMinute(now) - _lastSessionMinute.Value).TotalMinutes <= _config.GAP_LIMIT
                 ? Math.Max(0, (int)(GetRoundedMinute(now) - _sessionStartMinute.Value).TotalMinutes)
                 : 0;
+
+            if (sessionMinutes == 0)
+            {
+                _lastBreakReminderAt = null;
+                _reminderSessionStart = null;
+            }
+            else
+            {
+                if (_reminderSessionStart != _sessionStartMinute)
+                {
+                    _reminderSessionStart = _sessionStartMinute;
+                    _lastBreakReminderAt = null;
+                }
+
+                var reminderDue = sessionMinutes >= _config.BREAK_REMINDER_TIMER &&
+                    (!_lastBreakReminderAt.HasValue ||
+                     (now - _lastBreakReminderAt.Value).TotalMinutes >= _config.BREAK_REMINDER_INTERVAL);
+                if (reminderDue && HasRecentUserInput(now))
+                {
+                    ShowBreakReminder(sessionMinutes);
+                    _lastBreakReminderAt = now;
+                }
+            }
+
             _trayIcon.Text = $"Current Session: {sessionMinutes}m | IdleGrid";
+        }
+
+        private static bool HasRecentUserInput(DateTime now)
+        {
+            LASTINPUTINFO lii = new LASTINPUTINFO
+            {
+                cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>()
+            };
+            if (!GetLastInputInfo(ref lii)) return false;
+
+            var idleSeconds = (uint)Environment.TickCount - lii.dwTime;
+            return idleSeconds <= 30;
+        }
+
+        private static void ShowBreakReminder(int sessionMinutes)
+        {
+            Log.Info("Break reminder shown.");
+            _trayIcon.ShowBalloonTip(
+                5000,
+                "IdleGrid",
+                $"Time for a break. Current session: {sessionMinutes}m",
+                ToolTipIcon.Info);
         }
 
         private static void StartConfigWatcher()
