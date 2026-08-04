@@ -43,6 +43,7 @@ namespace IdleGridDaemon
         private static DateTime _currentMinute;
         private static DateTime? _sessionStartMinute;
         private static DateTime? _lastSessionMinute;
+        private static int? _lastBreakMinutes;
         private static DateTime? _lastBreakReminderAt;
         private static DateTime? _reminderSessionStart;
         private static AppConfig _config = new();
@@ -195,7 +196,11 @@ namespace IdleGridDaemon
                 {
                     if (!_sessionStartMinute.HasValue || !_lastSessionMinute.HasValue ||
                         (minute - _lastSessionMinute.Value).TotalMinutes > _config.GAP_LIMIT)
+                    {
+                        if (_lastSessionMinute.HasValue)
+                            _lastBreakMinutes = (int)(minute - _lastSessionMinute.Value).TotalMinutes;
                         _sessionStartMinute = minute;
+                    }
 
                     _lastSessionMinute = minute;
                 }
@@ -244,7 +249,11 @@ namespace IdleGridDaemon
             {
                 if (!_sessionStartMinute.HasValue || !_lastSessionMinute.HasValue ||
                     (_currentMinute - _lastSessionMinute.Value).TotalMinutes > _config.GAP_LIMIT)
+                {
+                    if (_lastSessionMinute.HasValue)
+                        _lastBreakMinutes = (int)(_currentMinute - _lastSessionMinute.Value).TotalMinutes;
                     _sessionStartMinute = _currentMinute;
+                }
 
                 _lastSessionMinute = _currentMinute;
             }
@@ -258,6 +267,7 @@ namespace IdleGridDaemon
             {
                 _lastBreakReminderAt = null;
                 _reminderSessionStart = null;
+                _lastBreakMinutes = null;
             }
             else
             {
@@ -277,7 +287,8 @@ namespace IdleGridDaemon
                 }
             }
 
-            _trayIcon.Text = $"Current Session: {sessionMinutes}m | IdleGrid";
+            var lastBreak = _lastBreakMinutes.HasValue ? $"{_lastBreakMinutes}m" : "-";
+            _trayIcon.Text = $"Current Session: {sessionMinutes}m | Last Break: {lastBreak}";
         }
 
         private static bool HasRecentUserInput(DateTime now)

@@ -257,6 +257,7 @@
                     <tr><th>Longest Streak</th><td id="statMaxStreak">-</td></tr>
                     <tr><th>Longest Break</th><td id="statMaxBreak">-</td></tr>
                     <tr><th>Current Session</th><td id="statCurrentStreak">-</td></tr>
+                    <tr><th>Last Break</th><td id="statLastBreak">-</td></tr>
                 </tbody>
             </table>
         </div>
@@ -598,9 +599,9 @@
                 async function findLogs(handle) {
                     // 1. Is it this folder?
                     try {
-                        // Check if any .log file exists here to confirm
+                        // Activity logs use yyyy-MM-dd.log; ignore daemon diagnostic logs.
                         for await (const entry of handle.values()) {
-                            if (entry.kind === 'file' && entry.name.endsWith('.log')) return handle;
+                            if (entry.kind === 'file' && /^\d{4}-\d{2}-\d{2}\.log$/.test(entry.name)) return handle;
                         }
                     } catch(e) {}
 
@@ -651,7 +652,7 @@
                 data = {}; // Clear data
                 updateVisuals(); // Update UI to show empty grid
                 // Reset stats displays
-                ['statDayStart','statWorkDayTotal','statActiveTime','statMaxStreak','statMaxBreak','statCurrentStreak'].forEach(id => {
+                ['statDayStart','statWorkDayTotal','statActiveTime','statMaxStreak','statMaxBreak','statCurrentStreak','statLastBreak'].forEach(id => {
                     document.getElementById(id).textContent = '-';
                 });
                 document.querySelector('#legendTable tbody').innerHTML = '';
@@ -763,6 +764,12 @@
                     currentStreakVal = nowMin - lastSession.start;
                 }
                 document.getElementById('statCurrentStreak').textContent = `${currentStreakVal}m`;
+
+                const lastBreakVal = currentStreakVal > 0 && sessions.length > 1
+                    ? lastSession.start - sessions[sessions.length - 2].last
+                    : null;
+                document.getElementById('statLastBreak').textContent =
+                    lastBreakVal === null ? '-' : `${lastBreakVal}m`;
             }
 
             // Active Time (sum of active minutes)
