@@ -212,7 +212,7 @@ namespace IdleGridDaemon
 
                 if (minute > _currentMinute)
                 {
-                    Log.Debug($"Starting new minute: {minute:HH:mm}");
+                    Console.WriteLine($"Starting new minute: {minute:HH:mm}");
                     FlushData();
                     _currentMinute = minute;
                 }
@@ -385,7 +385,7 @@ namespace IdleGridDaemon
             try
             {
                 File.AppendAllLines(filePath, new[] { logLine });
-                Log.Debug($"Logged: {_activeSecondsInMinute}s active in {_currentMinute:HH:mm}. File: {fileName}");
+                Console.WriteLine($"Logged: {_activeSecondsInMinute}s active in {_currentMinute:HH:mm}. File: {fileName}");
             }
             catch (Exception ex)
             {
@@ -414,6 +414,7 @@ namespace IdleGridDaemon
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "IdleGrid",
             "Daemon.log");
+        private const long MaxLogSizeBytes = 1024 * 1024;
         private static readonly object Sync = new();
 
         public static void Info(string message) => Write("INFO", message);
@@ -437,8 +438,20 @@ namespace IdleGridDaemon
             {
                 lock (Sync)
                 {
-                    Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-                    File.AppendAllText(LogPath, line + Environment.NewLine);
+                    var logDirectory = Path.GetDirectoryName(LogPath)!;
+                    Directory.CreateDirectory(logDirectory);
+
+                    var encodedLine = line + Environment.NewLine;
+                    var currentSize = File.Exists(LogPath) ? new FileInfo(LogPath).Length : 0;
+                    if (currentSize + System.Text.Encoding.UTF8.GetByteCount(encodedLine) > MaxLogSizeBytes)
+                    {
+                        var archivePath = Path.Combine(
+                            logDirectory,
+                            $"Daemon-{DateTime.Now:yyyy-MM-dd}.log");
+                        File.Move(LogPath, archivePath, true);
+                    }
+
+                    File.AppendAllText(LogPath, encodedLine);
                 }
             }
             catch (Exception ex)
