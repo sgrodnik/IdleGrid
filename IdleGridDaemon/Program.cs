@@ -33,14 +33,31 @@ namespace IdleGridDaemon
         [DllImport("user32.dll")]
         static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-        private static string _logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "IdleGrid", "logs");
+        private static readonly string _dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "IdleGrid");
+        private static readonly string _logDir = Path.Combine(_dataDir, "logs");
+        private static readonly string _configPath = Path.Combine(_dataDir, "config.json");
         private static Dictionary<string, int> _windowActivity = new();
         private static int _activeSecondsInMinute = 0;
         private static DateTime _currentMinute;
+        private static DateTime? _sessionStartMinute;
+        private static DateTime? _lastSessionMinute;
+        private static AppConfig _config = new();
+        private static FileSystemWatcher? _configWatcher;
+        private static System.Threading.Timer? _configReloadTimer;
+        private static readonly object _configReloadLock = new();
         private static readonly object _lock = new();
         private static NotifyIcon _trayIcon = null!;
         private static Icon _activeIcon = null!;
         private static Icon _idleIcon = null!;
+
+        private sealed class AppConfig
+        {
+            public int GAP_LIMIT { get; set; } = 5;
+            public int ACTIVE_THRESHOLD { get; set; } = 5;
+            public int WORK_START { get; set; } = 7;
+            public int WORK_END { get; set; } = 19;
+            public string FOLDER { get; set; } = "IdleGrid";
+        }
 
         static void Main(string[] args)
         {
@@ -65,6 +82,7 @@ namespace IdleGridDaemon
             }
 
             if (!Directory.Exists(_logDir)) Directory.CreateDirectory(_logDir);
+            var configLoaded = LoadConfig();
 
             _activeIcon = CreateSquareIcon(Color.LimeGreen);
             _idleIcon = CreateSquareIcon(Color.Gray);
@@ -73,7 +91,7 @@ namespace IdleGridDaemon
             {
                 Icon = _idleIcon,
                 Visible = true,
-                Text = "IdleGrid Daemon",
+                Text = "Current Session: 0m | IdleGrid",
                 ContextMenuStrip = new ContextMenuStrip()
             };
 
@@ -88,6 +106,10 @@ namespace IdleGridDaemon
                 _trayIcon.Visible = false;
                 Application.Exit();
             });
+
+            if (!configLoaded)
+                ShowConfigLoadError();
+            StartConfigWatcher();
 
             Console.WriteLine($"IdleGrid Daemon started.");
             Console.WriteLine($"Logs directory: {_logDir}");
@@ -165,6 +187,110 @@ namespace IdleGridDaemon
                         _windowActivity[activeWindow] = _windowActivity.GetValueOrDefault(activeWindow) + 1;
                     }
                 }
+
+                UpdateSession(now);
+            }
+        }
+
+        private static void UpdateSession(DateTime now)
+        {
+            if (_activeSecondsInMinute >= _config.ACTIVE_THRESHOLD && _lastSessionMinute != _currentMinute)
+            {
+                if (!_sessionStartMinute.HasValue || !_lastSessionMinute.HasValue ||
+                    (_currentMinute - _lastSessionMinute.Value).TotalMinutes > _config.GAP_LIMIT)
+                    _sessionStartMinute = _currentMinute;
+
+                _lastSessionMinute = _currentMinute;
+            }
+
+            var sessionMinutes = _sessionStartMinute.HasValue && _lastSessionMinute.HasValue &&
+                (GetRoundedMinute(now) - _lastSessionMinute.Value).TotalMinutes <= _config.GAP_LIMIT
+                ? Math.Max(0, (int)(GetRoundedMinute(now) - _sessionStartMinute.Value).TotalMinutes)
+                : 0;
+            _trayIcon.Text = $"Current Session: {sessionMinutes}m | IdleGrid";
+        }
+
+        private static void StartConfigWatcher()
+        {
+            _configWatcher = new FileSystemWatcher(_dataDir, Path.GetFileName(_configPath))
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
+                EnableRaisingEvents = true
+            };
+            _configWatcher.Changed += OnConfigFileChanged;
+            _configWatcher.Created += OnConfigFileChanged;
+            _configWatcher.Renamed += OnConfigFileRenamed;
+        }
+
+        private static void OnConfigFileChanged(object sender, FileSystemEventArgs e)
+        {
+            ScheduleConfigReload();
+        }
+
+        private static void OnConfigFileRenamed(object sender, RenamedEventArgs e)
+        {
+            ScheduleConfigReload();
+        }
+
+        private static void ScheduleConfigReload()
+        {
+            lock (_configReloadLock)
+            {
+                _configReloadTimer?.Dispose();
+                _configReloadTimer = new System.Threading.Timer(
+                    _ => ReloadConfig(),
+                    null,
+                    TimeSpan.FromMilliseconds(250),
+                    Timeout.InfiniteTimeSpan);
+            }
+        }
+
+        private static void ReloadConfig()
+        {
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                lock (_lock)
+                {
+                    if (LoadConfig()) return;
+                }
+
+                if (attempt < 2)
+                    Thread.Sleep(250);
+            }
+
+            ShowConfigLoadError();
+        }
+
+        private static void ShowConfigLoadError()
+        {
+            if (_trayIcon == null) return;
+
+            _trayIcon.ShowBalloonTip(
+                5000,
+                "IdleGrid configuration",
+                "Could not read config.json. The previous configuration is still active.",
+                ToolTipIcon.Warning);
+        }
+
+        private static bool LoadConfig()
+        {
+            try
+            {
+                if (File.Exists(_configPath))
+                {
+                    var loaded = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(_configPath));
+                    if (loaded != null && loaded.ACTIVE_THRESHOLD >= 0 && loaded.GAP_LIMIT >= 0)
+                        _config = loaded;
+                    else
+                        return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Error reading config: {ex.Message}");
+                return false;
             }
         }
 

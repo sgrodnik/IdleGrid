@@ -314,6 +314,34 @@
 
         let config = { ...defaultConfig };
 
+        async function readSharedConfig() {
+            if (!directoryHandle) return false;
+
+            try {
+                const fileHandle = await directoryHandle.getFileHandle('config.json');
+                const file = await fileHandle.getFile();
+                const sharedConfig = JSON.parse(await file.text());
+                config = { ...defaultConfig, ...sharedConfig, FOLDER: directoryHandle.name };
+                localStorage.setItem('ig-config', JSON.stringify(config));
+                return true;
+            } catch(e) {
+                if (e.name === 'NotFoundError') return false;
+                throw e;
+            }
+        }
+
+        async function writeSharedConfig(configToWrite = config) {
+            if (!directoryHandle) return;
+
+            const fileHandle = await directoryHandle.getFileHandle('config.json', { create: true });
+            const writable = await fileHandle.createWritable();
+            try {
+                await writable.write(JSON.stringify(configToWrite, null, 4));
+            } finally {
+                await writable.close();
+            }
+        }
+
         // Setup Resizing
         const root = document.querySelector(':root');
         const handle = document.getElementById('resizeHandle');
@@ -426,9 +454,15 @@
             });
 
             document.getElementById('btnSaveSettings').onclick = async () => {
+                let newConfig;
                 try {
-                    const newConfig = JSON.parse(txt.value);
+                    newConfig = JSON.parse(txt.value);
+                } catch(e) {
+                    alert("Invalid JSON format");
+                    return;
+                }
 
+                try {
                     // Logic to clear folder via JSON
                     if (config.FOLDER && !newConfig.FOLDER) {
                         await deleteHandle();
@@ -439,13 +473,22 @@
                         document.getElementById('status').textContent = ' No folder selected.';
                     }
 
+                    if (directoryHandle) {
+                        let permission = await directoryHandle.queryPermission({ mode: 'readwrite' });
+                        if (permission === 'prompt')
+                            permission = await directoryHandle.requestPermission({ mode: 'readwrite' });
+                        if (permission !== 'granted')
+                            throw new Error('Write permission was not granted for the selected folder.');
+                        await writeSharedConfig(newConfig);
+                    }
+
                     config = newConfig;
                     localStorage.setItem('ig-config', JSON.stringify(config));
                     closeSettings();
                     renderGrid();
                     if (logsFolderHandle) reloadData();
                 } catch(e) {
-                    alert("Invalid JSON format");
+                    alert(`Could not save configuration: ${e.message}`);
                 }
             };
 
@@ -543,6 +586,8 @@
                 await saveHandle(directoryHandle);
                 btnOpen.style.display = 'none';
                 config.FOLDER = directoryHandle.name;
+                const hasSharedConfig = await readSharedConfig();
+                if (!hasSharedConfig) await writeSharedConfig();
                 localStorage.setItem('ig-config', JSON.stringify(config));
 
                 // Try to find logs folder in common locations
@@ -580,7 +625,12 @@
 
                 await reloadData();
             } catch (err) {
-                console.error(err);
+                if (err.name === 'AbortError') return;
+
+                const btnOpen = document.getElementById('btnOpen');
+                btnOpen.style.display = 'inline-block';
+                btnOpen.textContent = 'Restore Access';
+                alert(`Could not load IdleGrid configuration: ${err.message}`);
             }
         }
 
@@ -707,7 +757,7 @@
                 // Current Session
                 let currentStreakVal = 0;
                 const lastSession = sessions[sessions.length - 1];
-                if (nowMin - lastSession.last <= 10) {
+                if (nowMin - lastSession.last <= config.GAP_LIMIT) {
                     currentStreakVal = nowMin - lastSession.start;
                 }
                 document.getElementById('statCurrentStreak').textContent = `${currentStreakVal}m`;
