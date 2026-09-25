@@ -26,6 +26,9 @@ namespace IdleGridDaemon
         [DllImport("user32.dll")]
         static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool DestroyIcon(IntPtr hIcon);
+
         [DllImport("user32.dll")]
         static extern IntPtr GetForegroundWindow();
 
@@ -156,7 +159,20 @@ namespace IdleGridDaemon
             {
                 g.Clear(color);
             }
-            return Icon.FromHandle(bmp.GetHicon());
+            return CreateIconFromBitmap(bmp);
+        }
+
+        private static Icon CreateIconFromBitmap(Bitmap bitmap)
+        {
+            var iconHandle = bitmap.GetHicon();
+            try
+            {
+                return (Icon)Icon.FromHandle(iconHandle).Clone();
+            }
+            finally
+            {
+                DestroyIcon(iconHandle);
+            }
         }
 
         private static Icon CreateSessionIcon(int sessionMinutes, bool isUserActive)
@@ -187,7 +203,7 @@ namespace IdleGridDaemon
             g.DrawString(label, font, Brushes.Black, new RectangleF(1, 1, 32, 32), format);
             g.DrawString(label, font, Brushes.White, textBounds, format);
 
-            return Icon.FromHandle(bmp.GetHicon());
+            return CreateIconFromBitmap(bmp);
         }
 
         private static void OpenVisualizer()
@@ -260,32 +276,50 @@ namespace IdleGridDaemon
 
         private static void OnTick(object? sender, ElapsedEventArgs e)
         {
-            lock (_lock)
+            try
             {
-                var now = DateTime.Now;
-                var minute = GetRoundedMinute(now);
-
-                if (minute > _currentMinute)
+                lock (_lock)
                 {
-                    Console.WriteLine($"Starting new minute: {minute:HH:mm}");
-                    FlushData();
-                    _currentMinute = minute;
-                }
+                    var now = DateTime.Now;
+                    var minute = GetRoundedMinute(now);
 
-                bool isActive = IsUserActive();
-
-                if (isActive)
-                {
-                    _activeSecondsInMinute++;
-                    string activeWindow = GetActiveWindowTitle();
-                    if (!string.IsNullOrEmpty(activeWindow))
+                    if (minute > _currentMinute)
                     {
-                        _windowActivity[activeWindow] = _windowActivity.GetValueOrDefault(activeWindow) + 1;
+                        RecordHourlyActivity(_currentMinute, _activeSecondsInMinute, minute);
+                        FlushData();
+                        _currentMinute = minute;
                     }
-                }
 
-                UpdateSession(now, isActive);
+                    bool isActive = IsUserActive();
+
+                    if (isActive)
+                    {
+                        _activeSecondsInMinute++;
+                        string activeWindow = GetActiveWindowTitle();
+                        if (!string.IsNullOrEmpty(activeWindow))
+                        {
+                            _windowActivity[activeWindow] = _windowActivity.GetValueOrDefault(activeWindow) + 1;
+                        }
+                    }
+
+                    UpdateSession(now, isActive);
+                }
             }
+            catch (Exception ex)
+            {
+                Log.Error("Error during daemon tick", ex);
+                ShowError("IdleGrid encountered an error while updating. See Daemon.log for details.");
+            }
+        }
+
+        private static void RecordHourlyActivity(DateTime completedMinute, int activeSeconds, DateTime nextMinute)
+        {
+            Console.Write($"{activeSeconds} ");
+
+            if (completedMinute.Date != nextMinute.Date || completedMinute.Hour != nextMinute.Hour)
+                Console.WriteLine();
+
+            Console.Out.Flush();
         }
 
         private static void UpdateSession(DateTime now, bool isUserActive)
@@ -502,7 +536,6 @@ namespace IdleGridDaemon
             try
             {
                 File.AppendAllLines(filePath, new[] { logLine });
-                Console.WriteLine($"Logged: {_activeSecondsInMinute}s active in {_currentMinute:HH:mm}. File: {fileName}");
             }
             catch (Exception ex)
             {
