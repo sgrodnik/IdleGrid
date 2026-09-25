@@ -457,13 +457,28 @@ namespace IdleGridDaemon
             {
                 lock (_lock)
                 {
-                    var previousConfig = JsonSerializer.Serialize(_config);
+                    var previousConfig = _config;
                     if (LoadConfig())
                     {
-                        var currentConfig = JsonSerializer.Serialize(_config);
-                        if (currentConfig != previousConfig)
+                        var changes = new List<string>();
+                        if (previousConfig.GAP_LIMIT != _config.GAP_LIMIT)
+                            changes.Add($"GAP_LIMIT: {previousConfig.GAP_LIMIT} -> {_config.GAP_LIMIT}");
+                        if (previousConfig.ACTIVE_THRESHOLD != _config.ACTIVE_THRESHOLD)
+                            changes.Add($"ACTIVE_THRESHOLD: {previousConfig.ACTIVE_THRESHOLD} -> {_config.ACTIVE_THRESHOLD}");
+                        if (previousConfig.WORK_START != _config.WORK_START)
+                            changes.Add($"WORK_START: {previousConfig.WORK_START} -> {_config.WORK_START}");
+                        if (previousConfig.WORK_END != _config.WORK_END)
+                            changes.Add($"WORK_END: {previousConfig.WORK_END} -> {_config.WORK_END}");
+                        if (previousConfig.FOLDER != _config.FOLDER)
+                            changes.Add($"FOLDER: {previousConfig.FOLDER} -> {_config.FOLDER}");
+                        if (previousConfig.BREAK_REMINDER_TIMER != _config.BREAK_REMINDER_TIMER)
+                            changes.Add($"BREAK_REMINDER_TIMER: {previousConfig.BREAK_REMINDER_TIMER} -> {_config.BREAK_REMINDER_TIMER}");
+                        if (previousConfig.BREAK_REMINDER_INTERVAL != _config.BREAK_REMINDER_INTERVAL)
+                            changes.Add($"BREAK_REMINDER_INTERVAL: {previousConfig.BREAK_REMINDER_INTERVAL} -> {_config.BREAK_REMINDER_INTERVAL}");
+
+                        if (changes.Count > 0)
                         {
-                            Log.Info($"Configuration applied: BREAK_REMINDER_TIMER={_config.BREAK_REMINDER_TIMER}, BREAK_REMINDER_INTERVAL={_config.BREAK_REMINDER_INTERVAL}, GAP_LIMIT={_config.GAP_LIMIT}, ACTIVE_THRESHOLD={_config.ACTIVE_THRESHOLD}");
+                            Log.Info($"Configuration changed: {string.Join("; ", changes)}");
                             UpdateSession(DateTime.Now, IsUserActive());
                         }
                         return;
