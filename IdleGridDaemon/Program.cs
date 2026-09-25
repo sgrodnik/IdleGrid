@@ -60,6 +60,7 @@ namespace IdleGridDaemon
         private static Icon? _sessionIcon;
         private static int _displayedSessionMinutes = -1;
         private static bool _displayedUserActive;
+        private static bool _displayedOverBreakLimit;
 
         private sealed class AppConfig
         {
@@ -369,7 +370,10 @@ namespace IdleGridDaemon
             var lastBreak = _lastBreakMinutes.HasValue ? $"{_lastBreakMinutes}m" : "-";
             _trayIcon.Text = $"Current Session: {sessionMinutes}m | Last Break: {lastBreak}";
 
-            if (sessionMinutes != _displayedSessionMinutes || isUserActive != _displayedUserActive)
+            var overBreakLimit = sessionMinutes > _config.BREAK_REMINDER_TIMER;
+            if (sessionMinutes != _displayedSessionMinutes ||
+                isUserActive != _displayedUserActive ||
+                overBreakLimit != _displayedOverBreakLimit)
             {
                 var newIcon = CreateSessionIcon(sessionMinutes, isUserActive);
                 var oldIcon = _sessionIcon;
@@ -377,6 +381,7 @@ namespace IdleGridDaemon
                 _trayIcon.Icon = newIcon;
                 _displayedSessionMinutes = sessionMinutes;
                 _displayedUserActive = isUserActive;
+                _displayedOverBreakLimit = overBreakLimit;
                 oldIcon?.Dispose();
             }
         }
@@ -407,12 +412,14 @@ namespace IdleGridDaemon
         {
             _configWatcher = new FileSystemWatcher(_dataDir, Path.GetFileName(_configPath))
             {
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
-                EnableRaisingEvents = true
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName
             };
             _configWatcher.Changed += OnConfigFileChanged;
             _configWatcher.Created += OnConfigFileChanged;
             _configWatcher.Renamed += OnConfigFileRenamed;
+            _configWatcher.Error += OnConfigWatcherError;
+            _configWatcher.EnableRaisingEvents = true;
+            Log.Info($"Watching configuration file: {_configPath}");
         }
 
         private static void OnConfigFileChanged(object sender, FileSystemEventArgs e)
@@ -422,6 +429,12 @@ namespace IdleGridDaemon
 
         private static void OnConfigFileRenamed(object sender, RenamedEventArgs e)
         {
+            ScheduleConfigReload();
+        }
+
+        private static void OnConfigWatcherError(object sender, ErrorEventArgs e)
+        {
+            Log.Error("Configuration file watcher reported an error", e.GetException());
             ScheduleConfigReload();
         }
 
@@ -444,7 +457,17 @@ namespace IdleGridDaemon
             {
                 lock (_lock)
                 {
-                    if (LoadConfig()) return;
+                    var previousConfig = JsonSerializer.Serialize(_config);
+                    if (LoadConfig())
+                    {
+                        var currentConfig = JsonSerializer.Serialize(_config);
+                        if (currentConfig != previousConfig)
+                        {
+                            Log.Info($"Configuration applied: BREAK_REMINDER_TIMER={_config.BREAK_REMINDER_TIMER}, BREAK_REMINDER_INTERVAL={_config.BREAK_REMINDER_INTERVAL}, GAP_LIMIT={_config.GAP_LIMIT}, ACTIVE_THRESHOLD={_config.ACTIVE_THRESHOLD}");
+                            UpdateSession(DateTime.Now, IsUserActive());
+                        }
+                        return;
+                    }
                 }
 
                 if (attempt < 2)
