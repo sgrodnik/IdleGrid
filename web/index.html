@@ -609,6 +609,13 @@
             }
         }
 
+        async function chooseDirectory() {
+            if (typeof window.showDirectoryPicker !== 'function') {
+                throw new Error('Folder selection is unavailable. In Brave, open brave://flags/#file-system-access-api, enable File System Access API, then restart Brave.');
+            }
+            return window.showDirectoryPicker();
+        }
+
         async function openFolder() {
             try {
                 const btnOpen = document.getElementById('btnOpen');
@@ -618,11 +625,11 @@
                     const opts = { mode: 'readwrite' };
                     if (await directoryHandle.queryPermission(opts) !== 'granted') {
                         if (await directoryHandle.requestPermission(opts) !== 'granted') {
-                            directoryHandle = await window.showDirectoryPicker();
+                            directoryHandle = await chooseDirectory();
                         }
                     }
                 } else {
-                    directoryHandle = await window.showDirectoryPicker();
+                    directoryHandle = await chooseDirectory();
                 }
 
                 await saveHandle(directoryHandle);
@@ -671,8 +678,10 @@
 
                 const btnOpen = document.getElementById('btnOpen');
                 btnOpen.style.display = 'inline-block';
-                btnOpen.textContent = 'Restore Access (Esc)';
-                alert(`Could not load IdleGrid configuration: ${err.message}`);
+                btnOpen.textContent = directoryHandle ? 'Restore Access (Esc)' : 'Choose Folder';
+                alert(err.message.startsWith('Folder selection is unavailable.')
+                    ? err.message
+                    : `Could not load IdleGrid configuration: ${err.message}`);
             }
         }
 
