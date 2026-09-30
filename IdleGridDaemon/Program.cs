@@ -232,24 +232,32 @@ namespace IdleGridDaemon
         private static void RestoreSessionFromLog()
         {
             var filePath = Path.Combine(_logDir, $"{DateTime.Today:yyyy-MM-dd}.log");
-            if (!File.Exists(filePath)) return;
-
             var activeSecondsByMinute = new Dictionary<DateTime, int>();
 
             try
             {
-                foreach (var line in File.ReadLines(filePath))
+                if (File.Exists(filePath))
                 {
-                    var parts = line.Split('|', 3);
-                    if (parts.Length < 2 ||
-                        !DateTime.TryParseExact(parts[0], "HH:mm", CultureInfo.InvariantCulture,
-                            DateTimeStyles.None, out var time) ||
-                        !int.TryParse(parts[1], out var activeSeconds))
-                        continue;
+                    foreach (var line in File.ReadLines(filePath))
+                    {
+                        var parts = line.Split('|', 3);
+                        if (parts.Length < 2 ||
+                            !DateTime.TryParseExact(parts[0], "HH:mm", CultureInfo.InvariantCulture,
+                                DateTimeStyles.None, out var time) ||
+                            !int.TryParse(parts[1], out var activeSeconds))
+                            continue;
 
-                    var minute = DateTime.Today.AddHours(time.Hour).AddMinutes(time.Minute);
-                    activeSecondsByMinute[minute] = activeSeconds;
+                        var minute = DateTime.Today.AddHours(time.Hour).AddMinutes(time.Minute);
+                        activeSecondsByMinute[minute] = activeSeconds;
+                    }
                 }
+
+                if (_activeSecondsInMinute > 0)
+                    activeSecondsByMinute[_currentMinute] = _activeSecondsInMinute;
+
+                DateTime? sessionStartMinute = null;
+                DateTime? lastSessionMinute = null;
+                int? lastBreakMinutes = null;
 
                 foreach (var entry in activeSecondsByMinute.OrderBy(x => x.Key))
                 {
@@ -257,16 +265,20 @@ namespace IdleGridDaemon
                         continue;
 
                     var minute = entry.Key;
-                    if (!_sessionStartMinute.HasValue || !_lastSessionMinute.HasValue ||
-                        (minute - _lastSessionMinute.Value).TotalMinutes > _config.GAP_LIMIT)
+                    if (!sessionStartMinute.HasValue || !lastSessionMinute.HasValue ||
+                        (minute - lastSessionMinute.Value).TotalMinutes > _config.GAP_LIMIT)
                     {
-                        if (_lastSessionMinute.HasValue)
-                            _lastBreakMinutes = (int)(minute - _lastSessionMinute.Value).TotalMinutes;
-                        _sessionStartMinute = minute;
+                        if (lastSessionMinute.HasValue)
+                            lastBreakMinutes = (int)(minute - lastSessionMinute.Value).TotalMinutes;
+                        sessionStartMinute = minute;
                     }
 
-                    _lastSessionMinute = minute;
+                    lastSessionMinute = minute;
                 }
+
+                _sessionStartMinute = sessionStartMinute;
+                _lastSessionMinute = lastSessionMinute;
+                _lastBreakMinutes = lastBreakMinutes;
             }
             catch (Exception ex)
             {
@@ -479,6 +491,13 @@ namespace IdleGridDaemon
                         if (changes.Count > 0)
                         {
                             Log.Info($"Configuration changed: {string.Join("; ", changes)}");
+                            if (previousConfig.GAP_LIMIT != _config.GAP_LIMIT ||
+                                previousConfig.ACTIVE_THRESHOLD != _config.ACTIVE_THRESHOLD)
+                            {
+                                RestoreSessionFromLog();
+                                _lastBreakReminderAt = null;
+                                _reminderSessionStart = null;
+                            }
                             UpdateSession(DateTime.Now, IsUserActive());
                         }
                         return;
