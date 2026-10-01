@@ -10,6 +10,10 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Timers;
 using System.Windows.Forms;
+using Wpf = System.Windows;
+using WpfControls = System.Windows.Controls;
+using WpfInterop = System.Windows.Interop;
+using WpfMedia = System.Windows.Media;
 using Microsoft.Win32;
 
 namespace IdleGridDaemon
@@ -28,6 +32,9 @@ namespace IdleGridDaemon
 
         [DllImport("user32.dll", SetLastError = true)]
         static extern bool DestroyIcon(IntPtr hIcon);
+
+        [DllImport("user32.dll")]
+        static extern uint GetDpiForWindow(IntPtr hWnd);
 
         [DllImport("user32.dll")]
         static extern IntPtr GetForegroundWindow();
@@ -58,6 +65,8 @@ namespace IdleGridDaemon
         private static Icon _activeIcon = null!;
         private static Icon _idleIcon = null!;
         private static Icon? _sessionIcon;
+        private static Control? _uiInvoker;
+        private static int _breakChoiceDialogOpen;
         private static int _displayedSessionMinutes = -1;
         private static bool _displayedUserActive;
         private static bool _displayedOverBreakLimit;
@@ -108,10 +117,13 @@ namespace IdleGridDaemon
                 Text = "Current Session: 0m | IdleGrid",
                 ContextMenuStrip = new ContextMenuStrip()
             };
+            _uiInvoker = new Control();
+            _ = _uiInvoker.Handle;
 
             _trayIcon.MouseClick += (s, e) => {
                 if (e.Button == MouseButtons.Left) OpenVisualizer();
             };
+            _trayIcon.BalloonTipClicked += (s, e) => ShowBreakChoiceDialog();
 
             _trayIcon.ContextMenuStrip.Items.Add("Open Visualizer", null, (s, e) => OpenVisualizer());
             _trayIcon.ContextMenuStrip.Items.Add("Open folder", null, (s, e) => Process.Start("explorer.exe", _dataDir));
@@ -127,6 +139,7 @@ namespace IdleGridDaemon
                 _sessionIcon?.Dispose();
                 _activeIcon.Dispose();
                 _idleIcon.Dispose();
+                _uiInvoker.Dispose();
             };
 
             if (!configLoaded)
@@ -231,40 +244,14 @@ namespace IdleGridDaemon
 
         private static void RestoreSessionFromLog()
         {
-            var filePath = Path.Combine(_logDir, $"{DateTime.Today:yyyy-MM-dd}.log");
-            var activeSecondsByMinute = new Dictionary<DateTime, int>();
-
             try
             {
-                if (File.Exists(filePath))
-                {
-                    foreach (var line in File.ReadLines(filePath))
-                    {
-                        var parts = line.Split('|', 3);
-                        if (parts.Length < 2 ||
-                            !DateTime.TryParseExact(parts[0], "HH:mm", CultureInfo.InvariantCulture,
-                                DateTimeStyles.None, out var time) ||
-                            !int.TryParse(parts[1], out var activeSeconds))
-                            continue;
-
-                        var minute = DateTime.Today.AddHours(time.Hour).AddMinutes(time.Minute);
-                        activeSecondsByMinute[minute] = activeSeconds;
-                    }
-                }
-
-                if (_activeSecondsInMinute > 0)
-                    activeSecondsByMinute[_currentMinute] = _activeSecondsInMinute;
-
                 DateTime? sessionStartMinute = null;
                 DateTime? lastSessionMinute = null;
                 int? lastBreakMinutes = null;
 
-                foreach (var entry in activeSecondsByMinute.OrderBy(x => x.Key))
+                foreach (var minute in ReadActiveMinutesToday())
                 {
-                    if (entry.Value < _config.ACTIVE_THRESHOLD)
-                        continue;
-
-                    var minute = entry.Key;
                     if (!sessionStartMinute.HasValue || !lastSessionMinute.HasValue ||
                         (minute - lastSessionMinute.Value).TotalMinutes > _config.GAP_LIMIT)
                     {
@@ -284,6 +271,39 @@ namespace IdleGridDaemon
             {
                 Log.Error("Error restoring session from log", ex);
                 ShowError("Could not restore the current session from today's log.");
+            }
+        }
+
+        private static List<DateTime> ReadActiveMinutesToday()
+        {
+            var activeSecondsByMinute = new Dictionary<DateTime, int>();
+            var filePath = Path.Combine(_logDir, $"{DateTime.Today:yyyy-MM-dd}.log");
+
+            lock (_lock)
+            {
+                if (File.Exists(filePath))
+                {
+                    foreach (var line in File.ReadLines(filePath))
+                    {
+                        var parts = line.Split('|', 3);
+                        if (parts.Length < 2 ||
+                            !DateTime.TryParseExact(parts[0], "HH:mm", CultureInfo.InvariantCulture,
+                                DateTimeStyles.None, out var time) ||
+                            !int.TryParse(parts[1], out var activeSeconds))
+                            continue;
+
+                        activeSecondsByMinute[DateTime.Today.AddHours(time.Hour).AddMinutes(time.Minute)] = activeSeconds;
+                    }
+                }
+
+                if (_activeSecondsInMinute > 0)
+                    activeSecondsByMinute[_currentMinute] = _activeSecondsInMinute;
+
+                return activeSecondsByMinute
+                    .Where(entry => entry.Value >= _config.ACTIVE_THRESHOLD)
+                    .Select(entry => entry.Key)
+                    .OrderBy(minute => minute)
+                    .ToList();
             }
         }
 
@@ -418,6 +438,188 @@ namespace IdleGridDaemon
                 "IdleGrid",
                 $"Time for a break. Current session: {sessionMinutes}m",
                 ToolTipIcon.Info);
+        }
+
+        private static void ShowBreakChoiceDialog()
+        {
+            if (Interlocked.Exchange(ref _breakChoiceDialogOpen, 1) != 0) return;
+
+            var lastBreak = FindLastBreakToday();
+            var now = DateTime.Now;
+            var minutesSinceBreakEnd = lastBreak.HasValue
+                ? Math.Max(0, (int)(GetRoundedMinute(now) - lastBreak.Value.BreakEndMinute).TotalMinutes)
+                : 0;
+
+            var dialogThread = new Thread(() =>
+            {
+                try
+                {
+                    var justNowButton = new WpfControls.Button
+                    {
+                        Content = "Just now",
+                        Padding = new Wpf.Thickness(5, 2.5, 5, 2.5),
+                        MinWidth = 84,
+                        Margin = new Wpf.Thickness(0, 0, 9, 0)
+                    };
+                    var backdatedButton = new WpfControls.Button
+                    {
+                        Content = lastBreak.HasValue ? $"Ended {minutesSinceBreakEnd}m ago" : "No break detected today",
+                        IsEnabled = lastBreak.HasValue,
+                        Padding = new Wpf.Thickness(5, 2.5, 5, 2.5)
+                    };
+
+                    var buttons = new WpfControls.StackPanel { Orientation = WpfControls.Orientation.Horizontal };
+                    buttons.Children.Add(justNowButton);
+                    buttons.Children.Add(backdatedButton);
+
+                    var content = new WpfControls.StackPanel();
+                    content.Children.Add(new WpfControls.TextBlock
+                    {
+                        Text = "Break check-in",
+                        FontSize = 16,
+                        FontWeight = Wpf.FontWeights.Normal
+                    });
+                    content.Children.Add(new WpfControls.TextBlock
+                    {
+                        Text = "When did your last break end?",
+                        FontSize = 12,
+                        Margin = new Wpf.Thickness(0, 2, 0, 6),
+                        Foreground = WpfMedia.Brushes.DimGray
+                    });
+                    content.Children.Add(buttons);
+
+                    var paddedContent = new WpfControls.Border
+                    {
+                        Padding = new Wpf.Thickness(9),
+                        Child = content
+                    };
+
+                    var window = new Wpf.Window
+                    {
+                        Title = "IdleGrid",
+                        Content = paddedContent,
+                        SizeToContent = Wpf.SizeToContent.WidthAndHeight,
+                        ResizeMode = Wpf.ResizeMode.NoResize,
+                        WindowStartupLocation = Wpf.WindowStartupLocation.Manual,
+                        ShowInTaskbar = false,
+                        Topmost = true,
+                        Background = WpfMedia.Brushes.White,
+                        FontFamily = new WpfMedia.FontFamily("Segoe UI"),
+                        FontSize = 13
+                    };
+
+                    justNowButton.Click += (s, e) =>
+                    {
+                        var resetAt = GetRoundedMinute(DateTime.Now);
+                        DateTime? previousActiveMinute;
+                        lock (_lock)
+                            previousActiveMinute = _lastSessionMinute;
+
+                        var breakMinutes = previousActiveMinute.HasValue
+                            ? Math.Max(0, (int)(resetAt - previousActiveMinute.Value).TotalMinutes)
+                            : (int?)null;
+                        QueueManualSessionStart(resetAt, resetAt, breakMinutes, "now");
+                        window.Close();
+                    };
+
+                    if (lastBreak.HasValue)
+                    {
+                        var selectedBreak = lastBreak.Value;
+                        backdatedButton.Click += (s, e) =>
+                        {
+                            var breakMinutes = (int)(selectedBreak.BreakEndMinute - selectedBreak.PreviousActiveMinute).TotalMinutes;
+                            QueueManualSessionStart(
+                                selectedBreak.BreakEndMinute,
+                                selectedBreak.LastActiveMinute,
+                                breakMinutes,
+                                $"{minutesSinceBreakEnd} minutes ago");
+                            window.Close();
+                        };
+                    }
+
+                    window.Loaded += (s, e) => PositionBreakChoiceWindow(window);
+                    window.Closed += (s, e) => Interlocked.Exchange(ref _breakChoiceDialogOpen, 0);
+                    window.ShowDialog();
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("Could not show break choice window", ex);
+                    Interlocked.Exchange(ref _breakChoiceDialogOpen, 0);
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "IdleGrid break choice window"
+            };
+            dialogThread.SetApartmentState(ApartmentState.STA);
+            dialogThread.Start();
+        }
+
+        private static void PositionBreakChoiceWindow(Wpf.Window window)
+        {
+            var cursor = Cursor.Position;
+            var workArea = Screen.FromPoint(cursor).WorkingArea;
+            var targetX = (cursor.X + workArea.Left + workArea.Width / 2.0) / 2.0;
+            var targetY = (cursor.Y + workArea.Top + workArea.Height / 2.0) / 2.0;
+            var dpi = GetDpiForWindow(new WpfInterop.WindowInteropHelper(window).Handle);
+            var scale = dpi == 0 ? 1.0 : dpi / 96.0;
+
+            window.Left = targetX / scale - window.ActualWidth / 2;
+            window.Top = targetY / scale - window.ActualHeight / 2;
+        }
+
+        private static void QueueManualSessionStart(
+            DateTime sessionStartMinute,
+            DateTime lastActiveMinute,
+            int? breakMinutes,
+            string selection)
+        {
+            _uiInvoker?.BeginInvoke(new Action(() =>
+                ApplyManualSessionStart(sessionStartMinute, lastActiveMinute, breakMinutes, selection)));
+        }
+
+        private static (DateTime PreviousActiveMinute, DateTime BreakEndMinute, DateTime LastActiveMinute)? FindLastBreakToday()
+        {
+            try
+            {
+                var activeMinutes = ReadActiveMinutesToday();
+
+                for (var index = activeMinutes.Count - 1; index > 0; index--)
+                {
+                    if ((activeMinutes[index] - activeMinutes[index - 1]).TotalMinutes > 1)
+                    {
+                        return (
+                            activeMinutes[index - 1],
+                            activeMinutes[index],
+                            activeMinutes[^1]);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Could not find the latest break in today's activity log", ex);
+            }
+
+            return null;
+        }
+
+        private static void ApplyManualSessionStart(
+            DateTime sessionStartMinute,
+            DateTime lastActiveMinute,
+            int? breakMinutes,
+            string selection)
+        {
+            lock (_lock)
+            {
+                _sessionStartMinute = sessionStartMinute;
+                _lastSessionMinute = lastActiveMinute;
+                _lastBreakMinutes = breakMinutes;
+                _lastBreakReminderAt = null;
+                _reminderSessionStart = sessionStartMinute;
+                UpdateSession(DateTime.Now, IsUserActive());
+            }
+
+            Log.Info($"Session reset manually: break ended {selection}; session starts at {sessionStartMinute:HH:mm}.");
         }
 
         private static void StartConfigWatcher()
