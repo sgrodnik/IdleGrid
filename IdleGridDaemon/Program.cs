@@ -461,15 +461,32 @@ namespace IdleGridDaemon
                         MinWidth = 84,
                         Margin = new Wpf.Thickness(0, 0, 9, 0)
                     };
+                    var minutesInput = new WpfControls.TextBox
+                    {
+                        Text = minutesSinceBreakEnd.ToString(CultureInfo.InvariantCulture),
+                        Width = 21,
+                        MaxLength = 6,
+                        VerticalContentAlignment = Wpf.VerticalAlignment.Center,
+                        TextAlignment = Wpf.TextAlignment.Center,
+                        Margin = new Wpf.Thickness(0, 0, 9, 0)
+                    };
                     var backdatedButton = new WpfControls.Button
                     {
-                        Content = lastBreak.HasValue ? $"Ended {minutesSinceBreakEnd}m ago" : "No break detected today",
-                        IsEnabled = lastBreak.HasValue,
+                        Content = $"Ended {minutesSinceBreakEnd}m ago",
                         Padding = new Wpf.Thickness(5, 2.5, 5, 2.5)
+                    };
+                    minutesInput.PreviewTextInput += (s, e) => e.Handled = !e.Text.All(char.IsDigit);
+                    minutesInput.TextChanged += (s, e) =>
+                    {
+                        backdatedButton.IsEnabled = int.TryParse(minutesInput.Text, out var minutes) && minutes >= 0;
+                        backdatedButton.Content = backdatedButton.IsEnabled
+                            ? $"Started at {GetRoundedMinute(DateTime.Now).AddMinutes(-minutes):HH:mm}"
+                            : "Enter minutes";
                     };
 
                     var buttons = new WpfControls.StackPanel { Orientation = WpfControls.Orientation.Horizontal };
                     buttons.Children.Add(justNowButton);
+                    buttons.Children.Add(minutesInput);
                     buttons.Children.Add(backdatedButton);
 
                     var content = new WpfControls.StackPanel();
@@ -481,7 +498,7 @@ namespace IdleGridDaemon
                     });
                     content.Children.Add(new WpfControls.TextBlock
                     {
-                        Text = "When did your last break end?",
+                        Text = "Minutes since your break ended:",
                         FontSize = 12,
                         Margin = new Wpf.Thickness(0, 2, 0, 6),
                         Foreground = WpfMedia.Brushes.DimGray
@@ -522,20 +539,24 @@ namespace IdleGridDaemon
                         window.Close();
                     };
 
-                    if (lastBreak.HasValue)
+                    backdatedButton.Click += (s, e) =>
                     {
-                        var selectedBreak = lastBreak.Value;
-                        backdatedButton.Click += (s, e) =>
-                        {
-                            var breakMinutes = (int)(selectedBreak.BreakEndMinute - selectedBreak.PreviousActiveMinute).TotalMinutes;
-                            QueueManualSessionStart(
-                                selectedBreak.BreakEndMinute,
-                                selectedBreak.LastActiveMinute,
-                                breakMinutes,
-                                $"{minutesSinceBreakEnd} minutes ago");
-                            window.Close();
-                        };
-                    }
+                        if (!int.TryParse(minutesInput.Text, out var minutesAgo) || minutesAgo < 0)
+                            return;
+
+                        var nowMinute = GetRoundedMinute(DateTime.Now);
+                        var sessionStart = nowMinute.AddMinutes(-minutesAgo);
+                        backdatedButton.Content = $"Started at {sessionStart:HH:mm}";
+                        var breakMinutes = lastBreak.HasValue
+                            ? (int?)(lastBreak.Value.BreakEndMinute - lastBreak.Value.PreviousActiveMinute).TotalMinutes
+                            : null;
+                        QueueManualSessionStart(
+                            sessionStart,
+                            nowMinute,
+                            breakMinutes,
+                            $"{minutesAgo} minutes ago");
+                        window.Close();
+                    };
 
                     window.Loaded += (s, e) => PositionBreakChoiceWindow(window);
                     window.Closed += (s, e) => Interlocked.Exchange(ref _breakChoiceDialogOpen, 0);
