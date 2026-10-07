@@ -82,6 +82,7 @@ namespace IdleGridDaemon
             public int BREAK_REMINDER_INTERVAL { get; set; } = 5;
         }
 
+        [STAThread]
         static void Main(string[] args)
         {
             var current = Process.GetCurrentProcess();
@@ -450,10 +451,8 @@ namespace IdleGridDaemon
                 ? Math.Max(0, (int)(GetRoundedMinute(now) - lastBreak.Value.BreakEndMinute).TotalMinutes)
                 : 0;
 
-            var dialogThread = new Thread(() =>
+            try
             {
-                try
-                {
                     var justNowButton = new WpfControls.Button
                     {
                         Content = "Just now",
@@ -561,19 +560,12 @@ namespace IdleGridDaemon
                     window.Loaded += (s, e) => PositionBreakChoiceWindow(window);
                     window.Closed += (s, e) => Interlocked.Exchange(ref _breakChoiceDialogOpen, 0);
                     window.ShowDialog();
-                }
-                catch (Exception ex)
-                {
-                    Log.Error("Could not show break choice window", ex);
-                    Interlocked.Exchange(ref _breakChoiceDialogOpen, 0);
-                }
-            })
+            }
+            catch (Exception ex)
             {
-                IsBackground = true,
-                Name = "IdleGrid break choice window"
-            };
-            dialogThread.SetApartmentState(ApartmentState.STA);
-            dialogThread.Start();
+                Log.Error("Could not show break choice window", ex);
+                Interlocked.Exchange(ref _breakChoiceDialogOpen, 0);
+            }
         }
 
         private static void PositionBreakChoiceWindow(Wpf.Window window)
